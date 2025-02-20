@@ -27,7 +27,7 @@ export default function Home() {
 
   return (
     <div style={{ padding: '20px', maxWidth: '600px', margin: '0 auto' }}>
-      <h1>Ingresa Dato Pendejo</h1>
+      <h1>Ingresa Dato Porfis</h1>
       <input
         type="text"
         value={id}
