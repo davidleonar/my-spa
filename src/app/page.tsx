@@ -1,4 +1,4 @@
-"use client"; // Add this line
+"use client";
 
 import { useState } from 'react';
 
