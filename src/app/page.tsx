@@ -10,7 +10,7 @@ export default function Home() {
   const fetchData = async () => {
     try {
       // Replace with your actual API endpoint
-      const response = await fetch(`https://your-api-endpoint.com/data?id=${id}`, {
+      const response = await fetch(`https://us-central1-rendimientos-5dbb9.cloudfunctions.net/getDataById?id=${id}`, {
         method: 'GET',
       });
       if (!response.ok) throw new Error('Failed to fetch data');
