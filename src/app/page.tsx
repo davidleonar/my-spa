@@ -83,10 +83,7 @@ export default function Home() {
               <div className="entry-row">
                 <span className="label">COP Balance:</span>
                 <span className="value balance">
-                  ${parseFloat(item.COPbalance).toLocaleString("es-CO", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  ${(item.COPbalance)} COP
                 </span>
               </div>
             </div>
