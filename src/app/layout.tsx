@@ -24,7 +24,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html>
       <Head>
         <link rel="icon" href="/logo.png" />
         <meta property="og:title" content="DPS Direct Provider Services" />
