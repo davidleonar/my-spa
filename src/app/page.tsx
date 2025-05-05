@@ -60,7 +60,7 @@ export default function Home() {
             disabled={loading}
             className="px-4 py-2 bg-green-600 rounded text-white hover:bg-green-700 disabled:bg-gray-500 transition-colors"
           >
-            {loading ? "Loading..." : "Fetch"}
+            {loading ? "Cargando..." : "Obtener datos"}
           </button>
         </form>
 
