@@ -161,23 +161,33 @@ export default function Home() {
                   </div>
                   <div className="flex justify-between">
                     <span className="font-semibold text-gray-300">Saldo COP:</span>
-                    <span className="text-gray-300">{item['Saldo COP']}</span>
+                    <span className="text-grey-300">{item['Saldo COP']}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="font-semibold text-gray-300">Precio BTC:</span>
-                    <span className="text-gray-300">{item['Precio BTC']}</span>
+                    <span className="text-grey-300">{item['Precio BTC']}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="font-semibold text-gray-300">Precio Dolar:</span>
-                    <span className="text-gray-300">{item['Precio Dolar']}</span>
+                    <span className="text-grey-300">{item['Precio Dolar']}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="font-semibold text-gray-300">Total:</span>
-                    <span className="text-gray-300">{item.Total}</span>
+                    <span className="text-grey-300">{item.Total}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="font-semibold text-gray-300">Operación:</span>
-                    <span className="text-green-400">{item.Operacion}</span>
+                    <span
+                      className={
+                        item.Operacion === 'Compra'
+                          ? 'text-green-400'
+                          : item.Operacion === 'Venta'
+                          ? 'text-red-400'
+                          : 'text-grey-300'
+                      }
+                    >
+                      {item.Operacion}
+                    </span>
                   </div>
                 </div>
               ))}
