@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import '../app/globals.css';
 
 // Interface for balance data (from getDataById)
@@ -31,6 +31,48 @@ export default function Home() {
   const [movements, setMovements] = useState<MovementRow[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  // New state for BTC/USD price tracking
+  const [currentPrice, setCurrentPrice] = useState<number | null>(null);
+  const [prevPrice, setPrevPrice] = useState<number | null>(null);
+  // New state for buy/sell forms
+  const [showBuyForm, setShowBuyForm] = useState<boolean>(false);
+  const [showSellForm, setShowSellForm] = useState<boolean>(false);
+  const [buyAmount, setBuyAmount] = useState<string>("");
+  const [sellAmount, setSellAmount] = useState<string>("");
+  const [accountNumber, setAccountNumber] = useState<string>("");
+
+  // Fetch BTC/USD price from CoinGecko API every 10 seconds
+  useEffect(() => {
+    const fetchPrice = async () => {
+      try {
+        const response = await fetch(
+          'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd'
+        );
+        if (!response.ok) throw new Error('Failed to fetch price');
+        const data = await response.json();
+        const newPrice = data.bitcoin.usd;
+        setPrevPrice(currentPrice); // Store previous price before updating
+        setCurrentPrice(newPrice);
+      } catch (err) {
+        console.error('Error fetching BTC price:', err);
+      }
+    };
+
+    fetchPrice(); // Initial fetch
+    const interval = setInterval(fetchPrice, 10000); // Fetch every 10 seconds
+
+    return () => clearInterval(interval); // Cleanup on unmount
+  }, [currentPrice]);
+
+  // Determine text color based on price change
+  const getColorClass = () => {
+    if (prevPrice === null || currentPrice === null) return 'text-white';
+    return currentPrice > prevPrice
+      ? 'text-green-400' // Price increased
+      : currentPrice < prevPrice
+      ? 'text-red-400'   // Price decreased
+      : 'text-white';    // No change
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -82,9 +124,110 @@ export default function Home() {
     if (id) fetchMovements();
   };
 
+  // Handle Buy Form Submission
+  const handleBuySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!data[0]) {
+      setError('No se encontraron datos para realizar la compra.');
+      return;
+    }
+    if (!buyAmount || parseFloat(buyAmount) <= 0) {
+      setError('Por favor, ingrese una cantidad válida.');
+      return;
+    }
+
+    const payload = {
+      id: id,
+      name: `${data[0].name} ${data[0].lastname}`,
+      cantidad: buyAmount,
+    };
+
+    try {
+      const response = await fetch(
+        'https://us-central1-rendimientos-5dbb9.cloudfunctions.net/sendToSales',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }
+      );
+      if (response.ok) {
+        setError(null);
+        setBuyAmount('');
+        setShowBuyForm(false);
+        alert('Compra enviada al equipo de ventas con éxito.');
+      } else {
+        setError('Error al enviar la compra.');
+      }
+    } catch (err) {
+      setError('Error al conectar con el servidor.');
+      console.error('Error sending buy request:', err);
+    }
+  };
+
+  // Handle Sell Form Submission
+  const handleSellSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!data[0]) {
+      setError('No se encontraron datos para realizar la venta.');
+      return;
+    }
+    if (!sellAmount || parseFloat(sellAmount) <= 0) {
+      setError('Por favor, ingrese una cantidad válida.');
+      return;
+    }
+    if (!accountNumber) {
+      setError('Por favor, ingrese un número de cuenta válido.');
+      return;
+    }
+
+    const payload = {
+      id: id,
+      name: `${data[0].name} ${data[0].lastname}`,
+      cantidad: sellAmount,
+      numeroDeCuenta: accountNumber,
+    };
+
+    try {
+      const response = await fetch(
+        'https://us-central1-rendimientos-5dbb9.cloudfunctions.net/sendToSales',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }
+      );
+      if (response.ok) {
+        setError(null);
+        setSellAmount('');
+        setAccountNumber('');
+        setShowSellForm(false);
+        alert('Venta enviada al equipo de ventas con éxito.');
+      } else {
+        setError('Error al enviar la venta.');
+      }
+    } catch (err) {
+      setError('Error al conectar con el servidor.');
+      console.error('Error sending sell request:', err);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center p-4">
       <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-full max-w-md">
+        {/* BTC/USD Price Banner */}
+        {currentPrice !== null ? (
+          <div className="mb-4 p-2 bg-gray-700 rounded-lg text-center">
+            <span className={getColorClass()}>
+              BTC/USD: ${currentPrice}
+            </span>
+          </div>
+        ) : (
+          <div className="mb-4 p-2 bg-gray-700 rounded-lg text-center">
+            Loading...
+          </div>
+        )}
+
         <h1 className="text-2xl font-bold mb-4 text-center">Saldos de Cuenta</h1>
 
         <form onSubmit={handleSubmit} className="flex items-center space-x-2 mb-4">
@@ -154,7 +297,6 @@ export default function Home() {
             <div className="space-y-4">
               {movements.map((item, index) => (
                 <div key={index} className="bg-gray-700 p-4 rounded shadow">
-                  
                   <div className="flex justify-between">
                     <span className="font-semibold text-gray-300">Fecha:</span>
                     <span>{item.Fecha}</span>
@@ -191,6 +333,89 @@ export default function Home() {
                   </div>
                 </div>
               ))}
+            </div>
+
+            {/* New Actions Card */}
+            <div className="mt-6 bg-gray-700 p-4 rounded shadow">
+              <h2 className="text-xl font-bold mb-4 text-center">Acciones</h2>
+              <div className="flex justify-around mb-4">
+                <button
+                  onClick={() => {
+                    setShowBuyForm(!showBuyForm);
+                    setShowSellForm(false); // Hide sell form if buy is clicked
+                    setError(null);
+                  }}
+                  className="px-4 py-2 bg-green-600 rounded text-white hover:bg-green-700 disabled:bg-gray-500"
+                  disabled={loading || !data[0]}
+                >
+                  Comprar
+                </button>
+                <button
+                  onClick={() => {
+                    setShowSellForm(!showSellForm);
+                    setShowBuyForm(false); // Hide buy form if sell is clicked
+                    setError(null);
+                  }}
+                  className="px-4 py-2 bg-red-600 rounded text-white hover:bg-red-700 disabled:bg-gray-500"
+                  disabled={loading || !data[0]}
+                >
+                  Vender
+                </button>
+              </div>
+
+              {/* Buy Form */}
+              {showBuyForm && (
+                <form onSubmit={handleBuySubmit} className="space-y-2">
+                  <input
+                    type="number"
+                    value={buyAmount}
+                    onChange={(e) => setBuyAmount(e.target.value)}
+                    placeholder="Cantidad"
+                    className="w-full p-2 bg-gray-600 rounded text-white border border-gray-500 focus:outline-none focus:border-green-500"
+                    min="0"
+                    step="0.00000001"
+                    required
+                  />
+                  <button
+                    type="submit"
+                    className="w-full px-4 py-2 bg-green-600 rounded text-white hover:bg-green-700 disabled:bg-gray-500"
+                    disabled={loading}
+                  >
+                    Enviar Compra
+                  </button>
+                </form>
+              )}
+
+              {/* Sell Form */}
+              {showSellForm && (
+                <form onSubmit={handleSellSubmit} className="space-y-2">
+                  <input
+                    type="number"
+                    value={sellAmount}
+                    onChange={(e) => setSellAmount(e.target.value)}
+                    placeholder="Cantidad"
+                    className="w-full p-2 bg-gray-600 rounded text-white border border-gray-500 focus:outline-none focus:border-red-500"
+                    min="0"
+                    step="0.00000001"
+                    required
+                  />
+                  <input
+                    type="text"
+                    value={accountNumber}
+                    onChange={(e) => setAccountNumber(e.target.value)}
+                    placeholder="Número de Cuenta"
+                    className="w-full p-2 bg-gray-600 rounded text-white border border-gray-500 focus:outline-none focus:border-red-500"
+                    required
+                  />
+                  <button
+                    type="submit"
+                    className="w-full px-4 py-2 bg-red-600 rounded text-white hover:bg-red-700 disabled:bg-gray-500"
+                    disabled={loading}
+                  >
+                    Enviar Venta
+                  </button>
+                </form>
+              )}
             </div>
           </div>
         )}
