@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import '../app/globals.css';
+import { ArrowsUpDownIcon } from '@heroicons/react/24/outline';
 
 // Interface for balance data (from getDataById)
 interface SpreadsheetRow {
@@ -40,6 +41,8 @@ export default function Home() {
   const [buyAmount, setBuyAmount] = useState<string>("");
   const [sellAmount, setSellAmount] = useState<string>("");
   const [accountNumber, setAccountNumber] = useState<string>("");
+  // New state for sort order in movements
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
   // Fetch BTC/USD price from CoinGecko API every 10 seconds
   useEffect(() => {
@@ -144,7 +147,7 @@ export default function Home() {
 
     try {
       const response = await fetch(
-        'https://rendimientos-4512.twil.io/sales-service', // Replace with your Twilio Function URL
+        'https://rendimientos-4512.twil.io/sales-service',
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -191,7 +194,7 @@ export default function Home() {
 
     try {
       const response = await fetch(
-        'https://rendimientos-4512.twil.io/sales-service', // Replace with your Twilio Function URL
+        'https://rendimientos-4512.twil.io/sales-service',
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -212,6 +215,20 @@ export default function Home() {
       setError('Error al conectar con el servidor.');
       console.error('Error sending sell request:', err);
     }
+  };
+
+  // Handle Sort by Date
+  const handleSortByDate = () => {
+    const newSortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+    setSortOrder(newSortOrder);
+
+    const sortedMovements = [...movements].sort((a, b) => {
+      const dateA = new Date(a.Fecha);
+      const dateB = new Date(b.Fecha);
+      return newSortOrder === 'asc' ? dateA.getTime() - dateB.getTime() : dateB.getTime() - dateA.getTime();
+    });
+
+    setMovements(sortedMovements);
   };
 
   return (
@@ -295,7 +312,16 @@ export default function Home() {
 
         {movements.length > 0 && (
           <div className="mt-6">
-            <h2 className="text-xl font-bold mb-4 text-center">Movimientos</h2>
+            <div className="flex items-center justify-center mb-4">
+              <h2 className="text-xl font-bold">Movimientos</h2>
+              <button
+                onClick={handleSortByDate}
+                className="ml-2 text-gray-400 hover:text-white focus:outline-none"
+                title={`Ordenar por fecha (${sortOrder === 'asc' ? 'ascendente' : 'descendente'})`}
+              >
+                <ArrowsUpDownIcon className="w-5 h-5" />
+              </button>
+            </div>
             <div className="space-y-4">
               {movements.map((item, index) => (
                 <div key={index} className="bg-gray-700 p-4 rounded shadow">
@@ -305,19 +331,19 @@ export default function Home() {
                   </div>
                   <div className="flex justify-between">
                     <span className="font-semibold text-gray-300">Saldo COP:</span>
-                    <span className="text-grey-300">{item['Saldo COP']}</span>
+                    <span className="text-gray-300">{item['Saldo COP']}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="font-semibold text-gray-300">Precio BTC:</span>
-                    <span className="text-grey-300">{item['Precio BTC']}</span>
+                    <span className="text-gray-300">{item['Precio BTC']}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="font-semibold text-gray-300">Precio Dolar:</span>
-                    <span className="text-grey-300">{item['Precio Dolar']}</span>
+                    <span className="text-gray-300">{item['Precio Dolar']}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="font-semibold text-gray-300">Total:</span>
-                    <span className="text-grey-300">{item.Total}</span>
+                    <span className="text-gray-300">{item.Total}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="font-semibold text-gray-300">Operación:</span>
@@ -327,7 +353,7 @@ export default function Home() {
                           ? 'text-green-400'
                           : item.Operacion === 'Venta'
                           ? 'text-red-400'
-                          : 'text-grey-300'
+                          : 'text-gray-300'
                       }
                     >
                       {item.Operacion}
