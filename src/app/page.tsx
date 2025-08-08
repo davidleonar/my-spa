@@ -144,20 +144,21 @@ export default function Home() {
 
     try {
       const response = await fetch(
-        'https://us-central1-rendimientos-5dbb9.cloudfunctions.net/sendToSales',
+        'https://rendimientos-4512.twil.io/sales-service', // Replace with your Twilio Function URL
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         }
       );
-      if (response.ok) {
+      const result = await response.json();
+      if (response.ok && result.success) {
         setError(null);
         setBuyAmount('');
         setShowBuyForm(false);
         alert('Compra enviada al equipo de ventas con éxito.');
       } else {
-        setError('Error al enviar la compra.');
+        setError(result.message || 'Error al enviar la compra.');
       }
     } catch (err) {
       setError('Error al conectar con el servidor.');
@@ -190,21 +191,22 @@ export default function Home() {
 
     try {
       const response = await fetch(
-        'https://us-central1-rendimientos-5dbb9.cloudfunctions.net/sendToSales',
+        'https://rendimientos-4512.twil.io/sales-service', // Replace with your Twilio Function URL
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         }
       );
-      if (response.ok) {
+      const result = await response.json();
+      if (response.ok && result.success) {
         setError(null);
         setSellAmount('');
         setAccountNumber('');
         setShowSellForm(false);
         alert('Venta enviada al equipo de ventas con éxito.');
       } else {
-        setError('Error al enviar la venta.');
+        setError(result.message || 'Error al enviar la venta.');
       }
     } catch (err) {
       setError('Error al conectar con el servidor.');
