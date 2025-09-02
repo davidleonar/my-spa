@@ -11,6 +11,7 @@ interface SpreadsheetRow {
   BTCbalance: string;
   COPbalance: string;
   Rendimiento: string;
+  AvgCompra: string;
   [key: string]: string | null;
 }
 
@@ -291,6 +292,10 @@ export default function Home() {
                 <div className="flex justify-between">
                   <span className="font-semibold text-gray-300">Rendimiento:</span>
                   <span className="text-green-400">{item.Rendimiento}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="font-semibold text-gray-300">Precio Promedio Compra:</span>
+                  <span className="text-green-400">{item.AvgCompra}</span>
                 </div>
               </div>
             ))}
