@@ -282,11 +282,11 @@ export default function Home() {
                   <span>{item.name} {item.lastname}</span>
                 </div>
                 <div className="flex justify-between mt-2">
-                  <span className="font-semibold text-gray-300">Saldo BTC:</span>
+                  <span className="font-semibold text-gray-300">Total Bitcoin:</span>
                   <span className="text-green-400">{item.BTCbalance} BTC</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="font-semibold text-gray-300">Saldo COP:</span>
+                  <span className="font-semibold text-gray-300">Saldo COP (Pesos):</span>
                   <span className="text-green-400">{item.COPbalance} COP</span>
                 </div>
                 <div className="flex justify-between">
@@ -347,7 +347,7 @@ export default function Home() {
                     <span className="text-gray-300">{item['Precio Dolar']}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="font-semibold text-gray-300">Total:</span>
+                    <span className="font-semibold text-gray-300">Total BTC:</span>
                     <span className="text-gray-300">{item.Total}</span>
                   </div>
                   <div className="flex justify-between">
