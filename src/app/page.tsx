@@ -136,6 +136,13 @@ export default function Home() {
     setMovements(sortedMovements);
   };
 
+  // Handle WhatsApp chat button click
+  const handleWhatsAppClick = () => {
+    const phoneNumber = "573014375496"; // Replace with your WhatsApp number
+    const message = encodeURIComponent("Hola, tengo dudas sobre...");
+    window.open(`https://wa.me/${phoneNumber}?text=${message}`, '_blank');
+  };
+
   return (
     <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center p-4">
       <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-full max-w-md">
@@ -146,12 +153,11 @@ export default function Home() {
           </div>
         ) : (
           <div className="mb-4 p-2 rounded text-center text-gray-400">
-            <p>Loading...</p>
+            <p>Loading BTC price...</p>
           </div>
         )}
 
         <h1 className="text-2xl font-bold mb-4 text-center">Saldos de Cuenta</h1>
-        
         <form onSubmit={handleSubmit} className="flex items-center space-x-2 mb-4">
           <input
             type="text"
@@ -272,6 +278,14 @@ export default function Home() {
             <div className="w-8 h-8 border-4 border-t-blue-500 border-gray-300 rounded-full animate-spin"></div>
           </div>
         )}
+
+        {/* WhatsApp Chat Button */}
+        <button
+          onClick={handleWhatsAppClick}
+          className="w-full mt-6 px-4 py-2 bg-green-600 rounded text-white hover:bg-green-700 transition-colors"
+        >
+          Contacto
+        </button>
       </div>
     </div>
   );
