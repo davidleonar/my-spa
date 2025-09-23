@@ -33,16 +33,10 @@ export default function Home() {
   const [movements, setMovements] = useState<MovementRow[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  // New state for BTC/USD price tracking
+  // State for BTC/USD price tracking
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
   const [prevPrice, setPrevPrice] = useState<number | null>(null);
-  // New state for buy/sell forms
-  const [showBuyForm, setShowBuyForm] = useState<boolean>(false);
-  const [showSellForm, setShowSellForm] = useState<boolean>(false);
-  const [buyAmount, setBuyAmount] = useState<string>("");
-  const [sellAmount, setSellAmount] = useState<string>("");
-  const [accountNumber, setAccountNumber] = useState<string>("");
-  // New state for sort order in movements
+  // State for sort order in movements
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
   // Fetch BTC/USD price from CoinGecko API every 10 seconds
@@ -128,96 +122,6 @@ export default function Home() {
     if (id) fetchMovements();
   };
 
-  // Handle Buy Form Submission
-  const handleBuySubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!data[0]) {
-      setError('No se encontraron datos para realizar la compra.');
-      return;
-    }
-    if (!buyAmount || parseFloat(buyAmount) <= 0) {
-      setError('Por favor, ingrese una cantidad válida.');
-      return;
-    }
-
-    const payload = {
-      id: id,
-      name: `${data[0].name} ${data[0].lastname}`,
-      cantidad: buyAmount,
-    };
-
-    try {
-      const response = await fetch(
-        'https://rendimientos-4512.twil.io/sales-service',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        }
-      );
-      const result = await response.json();
-      if (response.ok && result.success) {
-        setError(null);
-        setBuyAmount('');
-        setShowBuyForm(false);
-        alert('Compra enviada al equipo de ventas con éxito.');
-      } else {
-        setError(result.message || 'Error al enviar la compra.');
-      }
-    } catch (err) {
-      setError('Error al conectar con el servidor.');
-      console.error('Error sending buy request:', err);
-    }
-  };
-
-  // Handle Sell Form Submission
-  const handleSellSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!data[0]) {
-      setError('No se encontraron datos para realizar la venta.');
-      return;
-    }
-    if (!sellAmount || parseFloat(sellAmount) <= 0) {
-      setError('Por favor, ingrese una cantidad válida.');
-      return;
-    }
-    if (!accountNumber) {
-      setError('Por favor, ingrese un número de cuenta válido.');
-      return;
-    }
-
-    const payload = {
-      id: id,
-      name: `${data[0].name} ${data[0].lastname}`,
-      cantidad: sellAmount,
-      numeroDeCuenta: accountNumber,
-    };
-
-    try {
-      const response = await fetch(
-        'https://rendimientos-4512.twil.io/sales-service',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        }
-      );
-      const result = await response.json();
-      if (response.ok && result.success) {
-        setError(null);
-        setSellAmount('');
-        setAccountNumber('');
-        setShowSellForm(false);
-        alert('Venta enviada al equipo de ventas con éxito.');
-      } else {
-        setError(result.message || 'Error al enviar la venta.');
-      }
-    } catch (err) {
-      setError('Error al conectar con el servidor.');
-      console.error('Error sending sell request:', err);
-    }
-  };
-
   // Handle Sort by Date
   const handleSortByDate = () => {
     const newSortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
@@ -237,56 +141,49 @@ export default function Home() {
       <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-full max-w-md">
         {/* BTC/USD Price Banner */}
         {currentPrice !== null ? (
-          <div className="mb-4 p-2 bg-gray-700 rounded-lg text-center">
-            <span className={getColorClass()}>
-              BTC/USD: ${currentPrice}
-            </span>
+          <div className={`mb-4 p-2 rounded text-center ${getColorClass()}`}>
+            <p>BTC/USD: ${currentPrice.toLocaleString()}</p>
           </div>
         ) : (
-          <div className="mb-4 p-2 bg-gray-700 rounded-lg text-center">
-            Loading...
+          <div className="mb-4 p-2 rounded text-center text-gray-400">
+            <p>Loading...</p>
           </div>
         )}
 
         <h1 className="text-2xl font-bold mb-4 text-center">Saldos de Cuenta</h1>
-
+        
         <form onSubmit={handleSubmit} className="flex items-center space-x-2 mb-4">
           <input
             type="text"
             value={id}
             onChange={(e) => setId(e.target.value)}
-            placeholder="Enter Account ID"
-            className="flex-1 p-2 bg-gray-700 rounded border border-gray-600 text-white placeholder-gray-400 focus:outline-none focus:border-green-500"
+            placeholder="Enter ID"
+            className="w-full p-2 bg-gray-600 rounded text-white border border-gray-500 focus:outline-none focus:border-blue-500"
           />
           <button
             type="submit"
             disabled={loading}
             className="px-4 py-2 bg-green-600 rounded text-white hover:bg-green-700 disabled:bg-gray-500 transition-colors"
           >
-            {loading ? "Cargando..." : "Obtener datos"}
+            {loading ? "Cargando..." : "Obtener Datos"}
           </button>
         </form>
 
         {error && <p className="text-red-500 mb-4 text-center">{error}</p>}
 
         {data.length > 0 ? (
-          <div className="space-y-4">
+          <div>
             {data.map((item, index) => (
-              <div key={index} className="bg-gray-700 p-4 rounded shadow">
+              <div key={index} className="bg-gray-700 p-4 rounded shadow mb-4">
+                <h2 className="text-xl font-bold mb-2 text-center">
+                  {item.name} {item.lastname}
+                </h2>
                 <div className="flex justify-between">
-                  <span className="font-semibold text-gray-300">ID:</span>
-                  <span>{item.id}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="font-semibold text-gray-300">Nombre:</span>
-                  <span>{item.name} {item.lastname}</span>
-                </div>
-                <div className="flex justify-between mt-2">
-                  <span className="font-semibold text-gray-300">Total Bitcoin:</span>
+                  <span className="font-semibold text-gray-300">BTC Balance:</span>
                   <span className="text-green-400">{item.BTCbalance} BTC</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="font-semibold text-gray-300">Saldo COP (Pesos):</span>
+                  <span className="font-semibold text-gray-300">Saldo (Pesos):</span>
                   <span className="text-green-400">{item.COPbalance} COP</span>
                 </div>
                 <div className="flex justify-between">
@@ -366,89 +263,6 @@ export default function Home() {
                   </div>
                 </div>
               ))}
-            </div>
-
-            {/* New Actions Card */}
-            <div className="mt-6 bg-gray-700 p-4 rounded shadow">
-              <h2 className="text-xl font-bold mb-4 text-center">Acciones</h2>
-              <div className="flex justify-around mb-4">
-                <button
-                  onClick={() => {
-                    setShowBuyForm(!showBuyForm);
-                    setShowSellForm(false); // Hide sell form if buy is clicked
-                    setError(null);
-                  }}
-                  className="px-4 py-2 bg-green-600 rounded text-white hover:bg-green-700 disabled:bg-gray-500"
-                  disabled={loading || !data[0]}
-                >
-                  Comprar
-                </button>
-                <button
-                  onClick={() => {
-                    setShowSellForm(!showSellForm);
-                    setShowBuyForm(false); // Hide buy form if sell is clicked
-                    setError(null);
-                  }}
-                  className="px-4 py-2 bg-red-600 rounded text-white hover:bg-red-700 disabled:bg-gray-500"
-                  disabled={loading || !data[0]}
-                >
-                  Vender
-                </button>
-              </div>
-
-              {/* Buy Form */}
-              {showBuyForm && (
-                <form onSubmit={handleBuySubmit} className="space-y-2">
-                  <input
-                    type="number"
-                    value={buyAmount}
-                    onChange={(e) => setBuyAmount(e.target.value)}
-                    placeholder="Cantidad"
-                    className="w-full p-2 bg-gray-600 rounded text-white border border-gray-500 focus:outline-none focus:border-green-500"
-                    min="0"
-                    step="0.00000001"
-                    required
-                  />
-                  <button
-                    type="submit"
-                    className="w-full px-4 py-2 bg-green-600 rounded text-white hover:bg-green-700 disabled:bg-gray-500"
-                    disabled={loading}
-                  >
-                    Enviar Compra
-                  </button>
-                </form>
-              )}
-
-              {/* Sell Form */}
-              {showSellForm && (
-                <form onSubmit={handleSellSubmit} className="space-y-2">
-                  <input
-                    type="number"
-                    value={sellAmount}
-                    onChange={(e) => setSellAmount(e.target.value)}
-                    placeholder="Cantidad"
-                    className="w-full p-2 bg-gray-600 rounded text-white border border-gray-500 focus:outline-none focus:border-red-500"
-                    min="0"
-                    step="0.00000001"
-                    required
-                  />
-                  <input
-                    type="text"
-                    value={accountNumber}
-                    onChange={(e) => setAccountNumber(e.target.value)}
-                    placeholder="Número de Cuenta"
-                    className="w-full p-2 bg-gray-600 rounded text-white border border-gray-500 focus:outline-none focus:border-red-500"
-                    required
-                  />
-                  <button
-                    type="submit"
-                    className="w-full px-4 py-2 bg-red-600 rounded text-white hover:bg-red-700 disabled:bg-gray-500"
-                    disabled={loading}
-                  >
-                    Enviar Venta
-                  </button>
-                </form>
-              )}
             </div>
           </div>
         )}
