@@ -42,15 +42,15 @@ export default function Home() {
   //States for Wallet
   const [channelBalance, setChannelBalance] = useState<number | null>(null); // sat
   const [onChainBalance, setOnChainBalance] = useState<number | null>(null); // sat
-  const [invoice, setInvoice] = useState<string>('');
-  const [paymentHash, setPaymentHash] = useState<string>('');
+ // const [invoice, setInvoice] = useState<string>('');
+  //const [paymentHash, setPaymentHash] = useState<string>('');
   const [receiveAmount, setReceiveAmount] = useState<number>(0); // sat
-  const [payInvoice, setPayInvoice] = useState<string>(''); // bolt11
+  const [payInvoice, setPayInvoice] = useState<string>(''); // bolt11 */
   const [walletPassword, setWalletPassword] = useState<string>(''); // For unlock
   const [walletStatus, setWalletStatus] = useState<'locked' | 'unlocked' | 'init'>('locked');
 
   // Proxy URL (replace with your Firebase Functions URL)
-  const proxyUrl = 'https://us-central1-your-project.cloudfunctions.net/lndProxy';
+  const proxyUrl = 'http://127.0.0.1:5001/rendimientos-5dbb9/us-central1/lndProxy';
 
 
   // Fetch BTC/USD price from CoinGecko API every 10 seconds
@@ -182,7 +182,7 @@ export default function Home() {
       console.error('Balance error:', err);
     }
   };
-
+/*
   // Create invoice (receive)
   const createInvoice = async () => {
     try {
@@ -210,9 +210,10 @@ export default function Home() {
       alert('Payment sent successfully!');
     } catch (err) {
       console.error('Payment error:', err);
-      alert('Payment failed: ' + err.message);
+      //alert('Payment failed: ' + err.message);
     }
   };
+
 
   // Unlock wallet (if locked)
   const unlockWallet = async () => {
@@ -229,7 +230,7 @@ export default function Home() {
       console.error('Unlock error:', err);
     }
   };
-
+*/
 
 
 
@@ -382,7 +383,7 @@ export default function Home() {
                 placeholder="Wallet Password"
                 className="w-full p-2 bg-gray-600 rounded text-white mb-2"
               />
-              <button onClick={unlockWallet} className="w-full px-4 py-2 bg-blue-600 rounded">Unlock Wallet</button>
+              <button /*onClick={unlockWallet}*/ className="w-full px-4 py-2 bg-blue-600 rounded">Unlock Wallet</button>
             </div>
           ) : (
             <>
@@ -398,8 +399,8 @@ export default function Home() {
                 placeholder="Amount (sat)"
                 className="w-full p-2 bg-gray-600 rounded text-white mb-2"
               />
-              <button onClick={createInvoice} className="w-full px-4 py-2 bg-green-600 rounded mb-4">Generate Invoice</button>
-              {invoice && <p>Invoice: {invoice}</p>}
+              <button /*onClick={createInvoice}*/ className="w-full px-4 py-2 bg-green-600 rounded mb-4">Generate Invoice</button> 
+              {/*invoice && <p>Invoice: {invoice}</p>*/}
 
               {/* Send */}
               <input
@@ -409,7 +410,7 @@ export default function Home() {
                 placeholder="Bolt11 Invoice"
                 className="w-full p-2 bg-gray-600 rounded text-white mb-2"
               />
-              <button onClick={sendPayment} className="w-full px-4 py-2 bg-red-600 rounded">Send Payment</button>
+              <button /*onClick={sendPayment}*/ className="w-full px-4 py-2 bg-red-600 rounded">Send Payment</button>
             </>
           )}
         </div>
