@@ -39,6 +39,20 @@ export default function Home() {
   // State for sort order in movements
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
+  //States for Wallet
+  const [channelBalance, setChannelBalance] = useState<number | null>(null); // sat
+  const [onChainBalance, setOnChainBalance] = useState<number | null>(null); // sat
+  const [invoice, setInvoice] = useState<string>('');
+  const [paymentHash, setPaymentHash] = useState<string>('');
+  const [receiveAmount, setReceiveAmount] = useState<number>(0); // sat
+  const [payInvoice, setPayInvoice] = useState<string>(''); // bolt11
+  const [walletPassword, setWalletPassword] = useState<string>(''); // For unlock
+  const [walletStatus, setWalletStatus] = useState<'locked' | 'unlocked' | 'init'>('locked');
+
+  // Proxy URL (replace with your Firebase Functions URL)
+  const proxyUrl = 'https://us-central1-your-project.cloudfunctions.net/lndProxy';
+
+
   // Fetch BTC/USD price from CoinGecko API every 10 seconds
   useEffect(() => {
     const fetchPrice = async () => {
@@ -142,6 +156,82 @@ export default function Home() {
     const message = encodeURIComponent("Hola, tengo dudas sobre...");
     window.open(`https://wa.me/${phoneNumber}?text=${message}`, '_blank');
   };
+
+  // Check wallet status and balances
+  const fetchBalances = async () => {
+    try {
+      // Get node info to check if unlocked
+      const infoRes = await fetch(`${proxyUrl}?path=/v1/getinfo`);
+      const info = await infoRes.json();
+      if (info.error) {
+        setWalletStatus('locked');
+        return;
+      }
+      setWalletStatus('unlocked');
+
+      // Channel balance (Lightning)
+      const channelRes = await fetch(`${proxyUrl}?path=/v1/balance/channels`);
+      const channelData = await channelRes.json();
+      setChannelBalance(channelData.balance / 1000); // msat to sat
+
+      // On-chain balance
+      const onChainRes = await fetch(`${proxyUrl}?path=/v1/balance/blockchain`);
+      const onChainData = await onChainRes.json();
+      setOnChainBalance(onChainData.total_balance / 1000);
+    } catch (err) {
+      console.error('Balance error:', err);
+    }
+  };
+
+  // Create invoice (receive)
+  const createInvoice = async () => {
+    try {
+      const res = await fetch(`${proxyUrl}?path=/v1/invoices`, {
+        method: 'POST',
+        body: JSON.stringify({ value_msat: receiveAmount * 1000 }),
+      });
+      const data = await res.json();
+      setInvoice(data.payment_request);
+      setPaymentHash(data.r_hash);
+    } catch (err) {
+      console.error('Invoice error:', err);
+    }
+  };
+
+  // Send payment (pay invoice)
+  const sendPayment = async () => {
+    try {
+      const res = await fetch(`${proxyUrl}?path=/v1/channels/transactions`, {
+        method: 'POST',
+        body: JSON.stringify({ payment_request: payInvoice }),
+      });
+      const data = await res.json();
+      if (data.payment_error) throw new Error(data.payment_error);
+      alert('Payment sent successfully!');
+    } catch (err) {
+      console.error('Payment error:', err);
+      alert('Payment failed: ' + err.message);
+    }
+  };
+
+  // Unlock wallet (if locked)
+  const unlockWallet = async () => {
+    try {
+      const res = await fetch(`${proxyUrl}?path=/v1/unlockwallet`, {
+        method: 'POST',
+        body: JSON.stringify({ wallet_password: Buffer.from(walletPassword).toString('base64') }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setWalletStatus('unlocked');
+      fetchBalances();
+    } catch (err) {
+      console.error('Unlock error:', err);
+    }
+  };
+
+
+
 
   return (
     <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center p-4">
@@ -279,6 +369,51 @@ export default function Home() {
           </div>
         )}
 
+        {/* New Wallet Section */}
+        <div className="mt-6">
+          <h2 className="text-xl font-bold mb-4 text-center">Lightning Wallet</h2>
+          
+          {walletStatus === 'locked' ? (
+            <div>
+              <input
+                type="password"
+                value={walletPassword}
+                onChange={(e) => setWalletPassword(e.target.value)}
+                placeholder="Wallet Password"
+                className="w-full p-2 bg-gray-600 rounded text-white mb-2"
+              />
+              <button onClick={unlockWallet} className="w-full px-4 py-2 bg-blue-600 rounded">Unlock Wallet</button>
+            </div>
+          ) : (
+            <>
+              <button onClick={fetchBalances} className="w-full px-4 py-2 bg-blue-600 rounded mb-4">Refresh Balances</button>
+              <p>Channel Balance: {channelBalance ?? 'Loading...'} sat</p>
+              <p>On-Chain Balance: {onChainBalance ?? 'Loading...'} sat</p>
+
+              {/* Receive */}
+              <input
+                type="number"
+                value={receiveAmount}
+                onChange={(e) => setReceiveAmount(parseInt(e.target.value))}
+                placeholder="Amount (sat)"
+                className="w-full p-2 bg-gray-600 rounded text-white mb-2"
+              />
+              <button onClick={createInvoice} className="w-full px-4 py-2 bg-green-600 rounded mb-4">Generate Invoice</button>
+              {invoice && <p>Invoice: {invoice}</p>}
+
+              {/* Send */}
+              <input
+                type="text"
+                value={payInvoice}
+                onChange={(e) => setPayInvoice(e.target.value)}
+                placeholder="Bolt11 Invoice"
+                className="w-full p-2 bg-gray-600 rounded text-white mb-2"
+              />
+              <button onClick={sendPayment} className="w-full px-4 py-2 bg-red-600 rounded">Send Payment</button>
+            </>
+          )}
+        </div>
+
         {/* WhatsApp Chat Button */}
         <button
           onClick={handleWhatsAppClick}
@@ -286,6 +421,7 @@ export default function Home() {
         >
           Contacto
         </button>
+      
       </div>
     </div>
   );
