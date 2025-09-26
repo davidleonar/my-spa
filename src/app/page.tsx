@@ -213,10 +213,13 @@ export default function Home() {
       //alert('Payment failed: ' + err.message);
     }
   };
-
+*/
 
   // Unlock wallet (if locked)
   const unlockWallet = async () => {
+    setWalletStatus('unlocked');
+    fetchBalances();
+    /*
     try {
       const res = await fetch(`${proxyUrl}?path=/v1/unlockwallet`, {
         method: 'POST',
@@ -224,13 +227,12 @@ export default function Home() {
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      setWalletStatus('unlocked');
-      fetchBalances();
+      
     } catch (err) {
       console.error('Unlock error:', err);
-    }
+    }*/
   };
-*/
+
 
 
 
@@ -383,7 +385,7 @@ export default function Home() {
                 placeholder="Wallet Password"
                 className="w-full p-2 bg-gray-600 rounded text-white mb-2"
               />
-              <button /*onClick={unlockWallet}*/ className="w-full px-4 py-2 bg-blue-600 rounded">Unlock Wallet</button>
+              <button onClick={unlockWallet} className="w-full px-4 py-2 bg-blue-600 rounded">Unlock Wallet</button>
             </div>
           ) : (
             <>
