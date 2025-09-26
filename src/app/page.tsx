@@ -164,7 +164,7 @@ export default function Home() {
       const infoRes = await fetch(`${proxyUrl}?path=/v1/getinfo`);
       const info = await infoRes.json();
       if (info.error) {
-        setWalletStatus('locked');
+        setWalletStatus('unlocked');
         return;
       }
       setWalletStatus('unlocked');
@@ -219,6 +219,7 @@ export default function Home() {
   const unlockWallet = async () => {
     setWalletStatus('unlocked');
     fetchBalances();
+
     /*
     try {
       const res = await fetch(`${proxyUrl}?path=/v1/unlockwallet`, {
