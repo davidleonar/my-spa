@@ -1,5 +1,22 @@
 // src/app/api/lndProxy/[...path]/route.ts
 import { NextRequest } from 'next/server';
+
+/*
+export async function POST(req: NextRequest) {
+  return new Response(
+    JSON.stringify({ 
+      message: "DEBUG: Route is working!", 
+      path: req.url 
+    }),
+    { 
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    }
+  );
+}
+*/
+
+
 import fetch from 'node-fetch';
 
 // STATIC VALUES

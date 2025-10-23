@@ -35,10 +35,6 @@ interface InvoiceStatus {
   settled: boolean;
   amt_paid_sat: string;
 }
-interface InvoiceResponse {
-  payment_request: string;
-  r_hash: string;
-}
 
 export default function Home() {
   const [id, setId] = useState<string>("");
@@ -209,28 +205,33 @@ export default function Home() {
     setPaymentStatus('pending');
   
     try {
+      const body = JSON.stringify({
+        value_msat: donationAmount * 1000, // sats → msats
+        memo: 'Donation from App',
+        expiry: '300',
+        private: false,
+      });
       const res = await fetch('/api/lndProxy/v1/invoices', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          value_msat: donationAmount * 1000, // sats → msats
-          memo: 'Donation from App',
-          expiry: '300',
-          private: false,
-        }),
+        body,
       });
     
-      if (!res.ok) throw new Error('Failed to generate invoice');
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('Proxy error:', errorText);
+        throw new Error(`Server error: ${res.status}`);
+      }
   
-      const { payment_request, r_hash }: InvoiceResponse = await res.json();
-      setBolt11(payment_request);
-      setPaymentHash(r_hash);
-    } catch (error) {
-      setDonationError(error instanceof Error ? error.message : 'Failed to generate invoice');
-      console.error('Error generating invoice:', error);
+      const data = await res.json();
+      setBolt11(data.payment_request);
+      setPaymentHash(Buffer.from(data.r_hash, 'base64').toString('hex'));
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Unknown error';
+      setDonationError(message);
       setPaymentStatus(null);
-    }
-  };
+  }
+};
 
   const resetDonation = () => {
     setDonationAmount(0);
