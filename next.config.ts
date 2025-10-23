@@ -1,8 +1,16 @@
+// next.config.js
+
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // Remove this line → output: 'export',
   // Optional: silence lockfile warning
+  //output: 'export',  // CRITICAL: Enables static export
+  //trailingSlash: true,
+  //images: { unoptimized: true },  // Required for static export
+
   outputFileTracingRoot: '/Users/davidpaniagua/Documents/my-project/my-spa',
+
   async headers() {
     if (process.env.NODE_ENV === 'development') {
       return [

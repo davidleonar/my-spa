@@ -8,9 +8,16 @@
     ],
     "rewrites": [
       {
+        "source": "/api/lndProxy/**",
+        "function": "lndProxy"
+      },
+      {
         "source":"**",
-        "destination":"/index.html"
+        "destination":"nextServer"
       }
-    ]
+      
+    ],
+    "cleanUrls": true,
+    "trailingSlash": false
   }
 }
