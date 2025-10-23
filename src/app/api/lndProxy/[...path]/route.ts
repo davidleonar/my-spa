@@ -1,60 +1,136 @@
 // src/app/api/lndProxy/[...path]/route.ts
 import { NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
 
-/*
-export async function POST(req: NextRequest) {
-  return new Response(
-    JSON.stringify({ 
-      message: "DEBUG: Route is working!", 
-      path: req.url 
-    }),
-    { 
-      status: 200,
-      headers: { 'Content-Type': 'application/json' }
-    }
-  );
+interface LndInvoiceRequest {
+  value_msat: number;
+  memo?: string;
+  expiry?: string;
+  private?: boolean;
 }
-*/
 
-
-import fetch from 'node-fetch';
-
+/* ------------------------------------------------------------------ */
+/*  POST – create invoice                                            */
+/* ------------------------------------------------------------------ */
 export async function POST(req: NextRequest) {
   const { pathname, search } = new URL(req.url);
-  const lndPath = pathname.replace(/^\/api\/lndProxy/, '') + search; // preserve query
+  const lndPath = pathname.replace(/^\/api\/lndProxy/, '') + search;
 
-  const headers = Object.fromEntries(req.headers.entries());
-  const body = await req.text();
+  const proxyUrl = `https://us-central1-rendimientos-5dbb9.cloudfunctions.net/lndProxy?path=${lndPath}`;
 
-  const proxyUrl = `https://us-central1-rendimientos-5dbb9.cloudfunctions.net/lndProxy?path=${encodeURIComponent(lndPath)}`;
+  console.log('POST → Firebase:', proxyUrl);
 
-  console.log('Forwarding to Firebase:', proxyUrl, body);
+  try {
+    const headers = new Headers(req.headers);
+    headers.set('Content-Type', 'application/json');
 
-  const lndResp = await fetch(proxyUrl, {
-    method: 'POST',
-    headers: {
-      ...headers,
-      'Content-Type': 'application/json',
-    },
-    body,
-  });
+    let payload: LndInvoiceRequest | null = null;
+    if (req.method === 'POST') {
+      try { payload = await req.json(); }
+      catch {
+        return new NextResponse(
+          JSON.stringify({ error: 'Invalid JSON body' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+    }
 
-  const text = await lndResp.text();
-  console.log('Firebase →', lndResp.status, text);
+    console.log('Body:', payload);
 
-  // === ADD ERROR LOGGING ===
-  if (!lndResp.ok) {
-    const errorText = await lndResp.text();
-    console.error('LND Proxy Error:', lndResp.status, errorText);
-    return new Response(
-      JSON.stringify({ error: 'LND Proxy failed', details: errorText }),
-      { status: lndResp.status }
+    const firebaseResp = await fetch(proxyUrl, {
+      method: 'POST',
+      headers,
+      body: payload ? JSON.stringify(payload) : undefined,
+    });
+
+    const clone = firebaseResp.clone();
+    let data: unknown;
+    try { data = await firebaseResp.json(); }
+    catch {
+      const txt = await clone.text();
+      console.error('Non-JSON from Firebase:', txt);
+      return new NextResponse(
+        JSON.stringify({ error: 'Invalid proxy response', details: txt }),
+        { status: 502, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    if (!firebaseResp.ok) {
+      console.error('LND Proxy Error:', firebaseResp.status, data);
+      return new NextResponse(
+        JSON.stringify({ error: 'LND Proxy failed', details: data }),
+        { status: firebaseResp.status, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    return new NextResponse(JSON.stringify(data), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'unknown';
+    console.error('POST proxy error:', msg);
+    return new NextResponse(
+      JSON.stringify({ error: 'Internal error', details: msg }),
+      { status: 500, headers: { 'Content c-Type': 'application/json' } }
     );
   }
+}
 
-  const data = await lndResp.json();
-  return new Response(JSON.stringify(data), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  });
+/* ------------------------------------------------------------------ */
+/*  GET – lookup invoice                                             */
+/* ------------------------------------------------------------------ */
+export async function GET(req: NextRequest) {
+  const { pathname, search } = new URL(req.url);
+  const lndPath = pathname.replace(/^\/api\/lndProxy/, '') + search;
+
+  const proxyUrl = `https://us-central1-rendimientos-5dbb9.cloudfunctions.net/lndProxy?path=${lndPath}`;
+
+  console.log('GET → Firebase:', proxyUrl);
+
+  try {
+    const firebaseResp = await fetch(proxyUrl, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    const clone = firebaseResp.clone();
+    let data: unknown;
+    try { data = await firebaseResp.json(); }
+    catch {
+      const txt = await clone.text();
+      console.error('Non-JSON from Firebase:', txt);
+      return new NextResponse(
+        JSON.stringify({ error: 'Invalid proxy response', details: txt }),
+        { status: 502, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    if (!firebaseResp.ok) {
+      console.error('LND error:', firebaseResp.status, data);
+      return new NextResponse(
+        JSON.stringify({ error: 'LND failed', details: data }),
+        { status: firebaseResp.status, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    return new NextResponse(JSON.stringify(data), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'unknown';
+    console.error('GET proxy error:', msg);
+    return new NextResponse(
+      JSON.stringify({ error: 'Internal error', details: msg }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  HEAD – for CORS preflight (optional but clean)                   */
+/* ------------------------------------------------------------------ */
+export async function HEAD() {
+  return new NextResponse(null, { status: 200 });
 }

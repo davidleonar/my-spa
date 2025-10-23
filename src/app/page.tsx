@@ -32,8 +32,12 @@ interface MovementRow {
 
 // Interface for invoices
 interface InvoiceStatus {
+  r_hash: string;  // Base64-encoded hash (for verification)
+  state: number;   // 2 = SETTLED (per LND enum: https://docs.lightning.engineering/reference/types?ref=docs.lightning.engineering#InvoiceState)
   settled: boolean;
-  amt_paid_sat: string;
+  settle_date: string;  // Unix timestamp when settled
+  amt_paid_sat: string; // Amount paid in satoshis
+  // ... other fields as needed
 }
 
 export default function Home() {
@@ -170,24 +174,38 @@ export default function Home() {
     if (paymentHash && paymentStatus === 'pending') {
       interval = setInterval(async () => {
         try {
-          const res = await fetch(`/api/check-donation-status?paymentHash=${paymentHash}`);
-          if (!res.ok) throw new Error('Failed to check status');
+          // Proxy through your existing LND route: /v1/invoice/{paymentHash}
+          const res = await fetch(`/api/lndProxy/v1/invoice/${paymentHash}`);
+          if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to check invoice`);
+          
           const invoice: InvoiceStatus = await res.json();
+          
+          // Check settled status (LND uses 'settled' boolean directly)
           if (invoice.settled) {
             setPaymentStatus('settled');
-            clearInterval(interval);
-            clearTimeout(timeout);
+            console.log('Payment settled! Amount:', invoice.amt_paid_sat, 'sats');
+
+            // Show success toast (optional: replace with toast library later)
+            alert(`¡Pago recibido! ${Number(invoice.amt_paid_sat) / 1000} sats`);
+
+            // Auto-reset after 3 seconds
+            setTimeout(() => {
+            resetDonation();
+            }, 3000);
           }
         } catch (error) {
           console.error('Check status error:', error);
           setDonationError('Failed to check payment status');
+          // Don't stop polling on transient errors
         }
       }, 10000); // Poll every 10s
+  
+      // Timeout after 5 min
       timeout = setTimeout(() => {
         setPaymentStatus(null);
         setDonationError('Payment check timed out');
         clearInterval(interval);
-      }, 300000); // 5 minutes
+      }, 300000);
     }
     return () => {
       clearInterval(interval);
@@ -210,6 +228,7 @@ export default function Home() {
         memo: 'Donation from App',
         expiry: '300',
         private: false,
+        add_index: 1,
       };
       const res = await fetch('/api/lndProxy/v1/invoices', {
         method: 'POST',

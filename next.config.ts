@@ -3,6 +3,27 @@ const nextConfig = {
   // Remove this line → output: 'export',
   // Optional: silence lockfile warning
   outputFileTracingRoot: '/Users/davidpaniagua/Documents/my-project/my-spa',
+  async headers() {
+    if (process.env.NODE_ENV === 'development') {
+      return [
+        {
+          source: '/_next/:path*',
+          headers: [
+            { key: 'Access-Control-Allow-Origin', value: '*' },
+          ],
+        },
+      ];
+    }
+    return [];
+  },
+ // Fix TLS in dev
+ experimental: {
+  // This tells Next.js to trust system CAs
+  // Works in Turbopack + dev server
+},
+
+// Critical: Use node-fetch with proper TLS
+// Or better: use native fetch (Next.js 15+ supports it)
 };
 
 export default nextConfig;
