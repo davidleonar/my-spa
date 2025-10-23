@@ -1,8 +1,8 @@
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
-  /* config options here */
-  output: 'export'
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  // Remove this line → output: 'export',
+  // Optional: silence lockfile warning
+  outputFileTracingRoot: '/Users/davidpaniagua/Documents/my-project/my-spa',
 };
 
 export default nextConfig;

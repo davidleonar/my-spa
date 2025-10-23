@@ -2,6 +2,9 @@
 import { useState, useEffect } from "react";
 import '../app/globals.css';
 import { ArrowsUpDownIcon } from '@heroicons/react/24/outline';
+import { QRCodeCanvas } from 'qrcode.react';  // Use named export
+
+export const dynamic = 'force-dynamic';
 
 // Interface for balance data (from getDataById)
 interface SpreadsheetRow {
@@ -27,6 +30,16 @@ interface MovementRow {
   [key: string]: string | null;
 }
 
+// Interface for invoices
+interface InvoiceStatus {
+  settled: boolean;
+  amt_paid_sat: string;
+}
+interface InvoiceResponse {
+  payment_request: string;
+  r_hash: string;
+}
+
 export default function Home() {
   const [id, setId] = useState<string>("");
   const [data, setData] = useState<SpreadsheetRow[]>([]);
@@ -39,21 +52,17 @@ export default function Home() {
   // State for sort order in movements
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
-  //States for Wallet
-  const [channelBalance, setChannelBalance] = useState<number | null>(null); // sat
-  const [onChainBalance, setOnChainBalance] = useState<number | null>(null); // sat
- // const [invoice, setInvoice] = useState<string>('');
-  //const [paymentHash, setPaymentHash] = useState<string>('');
-  const [receiveAmount, setReceiveAmount] = useState<number>(0); // sat
-  const [payInvoice, setPayInvoice] = useState<string>(''); // bolt11 */
-  const [walletPassword, setWalletPassword] = useState<string>(''); // For unlock
-  const [walletStatus, setWalletStatus] = useState<'locked' | 'unlocked' | 'init'>('locked');
+  // States for donations
+  const [donationAmount, setDonationAmount] = useState<number>(0);
+  const [bolt11, setBolt11] = useState<string | null>(null);
+  const [paymentHash, setPaymentHash] = useState<string | null>(null);
+  const [paymentStatus, setPaymentStatus] = useState<'pending' | 'settled' | null>(null);
+  const [donationError, setDonationError] = useState<string | null>(null);
 
-  // Proxy URL (replace with your Firebase Functions URL)
-  const proxyUrl = 'http://127.0.0.1:5001/rendimientos-5dbb9/us-central1/lndProxy';
+  // Proxy URL from env
+  //const proxyUrl = process.env.LND_PROXY_URL || 'https://us-central1-rendimientos-5dbb9.cloudfunctions.net/lndProxy';
 
-
-  // Fetch BTC/USD price from CoinGecko API every 10 seconds
+  // Fetch BTC/USD price from CoinGecko API every 30 seconds
   useEffect(() => {
     const fetchPrice = async () => {
       try {
@@ -71,7 +80,7 @@ export default function Home() {
     };
 
     fetchPrice(); // Initial fetch
-    const interval = setInterval(fetchPrice, 10000); // Fetch every 10 seconds
+    const interval = setInterval(fetchPrice, 30000); // Fetch every 30 seconds
 
     return () => clearInterval(interval); // Cleanup on unmount
   }, [currentPrice]);
@@ -157,84 +166,79 @@ export default function Home() {
     window.open(`https://wa.me/${phoneNumber}?text=${message}`, '_blank');
   };
 
-  // Check wallet status and balances
-  const fetchBalances = async () => {
+
+  // Notificaciones para el estado de la factura
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    let timeout: NodeJS.Timeout;
+    if (paymentHash && paymentStatus === 'pending') {
+      interval = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/check-donation-status?paymentHash=${paymentHash}`);
+          if (!res.ok) throw new Error('Failed to check status');
+          const invoice: InvoiceStatus = await res.json();
+          if (invoice.settled) {
+            setPaymentStatus('settled');
+            clearInterval(interval);
+            clearTimeout(timeout);
+          }
+        } catch (error) {
+          console.error('Check status error:', error);
+          setDonationError('Failed to check payment status');
+        }
+      }, 10000); // Poll every 10s
+      timeout = setTimeout(() => {
+        setPaymentStatus(null);
+        setDonationError('Payment check timed out');
+        clearInterval(interval);
+      }, 300000); // 5 minutes
+    }
+    return () => {
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
+  }, [paymentHash, paymentStatus]);
+
+  // generar la factura
+  const generateDonationInvoice = async () => {
+    if (donationAmount <= 0) {
+      setDonationError('Amount must be greater than 0');
+      return;
+    }
+    setDonationError(null);
+    setPaymentStatus('pending');
+  
     try {
-      // Get node info to check if unlocked
-      const infoRes = await fetch(`${proxyUrl}?path=/v1/getinfo`);
-      const info = await infoRes.json();
-      if (info.error) {
-        setWalletStatus('unlocked');
-        return;
-      }
-      setWalletStatus('unlocked');
-
-      // Channel balance (Lightning)
-      const channelRes = await fetch(`${proxyUrl}?path=/v1/balance/channels`);
-      const channelData = await channelRes.json();
-      setChannelBalance(channelData.balance / 1000); // msat to sat
-
-      // On-chain balance
-      const onChainRes = await fetch(`${proxyUrl}?path=/v1/balance/blockchain`);
-      const onChainData = await onChainRes.json();
-      setOnChainBalance(onChainData.total_balance / 1000);
-    } catch (err) {
-      console.error('Balance error:', err);
+      const res = await fetch('/api/lndProxy/v1/invoices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          value_msat: donationAmount * 1000, // sats → msats
+          memo: 'Donation from App',
+          expiry: '300',
+          private: false,
+        }),
+      });
+    
+      if (!res.ok) throw new Error('Failed to generate invoice');
+  
+      const { payment_request, r_hash }: InvoiceResponse = await res.json();
+      setBolt11(payment_request);
+      setPaymentHash(r_hash);
+    } catch (error) {
+      setDonationError(error instanceof Error ? error.message : 'Failed to generate invoice');
+      console.error('Error generating invoice:', error);
+      setPaymentStatus(null);
     }
   };
-/*
-  // Create invoice (receive)
-  const createInvoice = async () => {
-    try {
-      const res = await fetch(`${proxyUrl}?path=/v1/invoices`, {
-        method: 'POST',
-        body: JSON.stringify({ value_msat: receiveAmount * 1000 }),
-      });
-      const data = await res.json();
-      setInvoice(data.payment_request);
-      setPaymentHash(data.r_hash);
-    } catch (err) {
-      console.error('Invoice error:', err);
-    }
+
+  const resetDonation = () => {
+    setDonationAmount(0);
+    setBolt11(null);
+    setPaymentHash(null);
+    setPaymentStatus(null);
+    setDonationError(null);
   };
-
-  // Send payment (pay invoice)
-  const sendPayment = async () => {
-    try {
-      const res = await fetch(`${proxyUrl}?path=/v1/channels/transactions`, {
-        method: 'POST',
-        body: JSON.stringify({ payment_request: payInvoice }),
-      });
-      const data = await res.json();
-      if (data.payment_error) throw new Error(data.payment_error);
-      alert('Payment sent successfully!');
-    } catch (err) {
-      console.error('Payment error:', err);
-      //alert('Payment failed: ' + err.message);
-    }
-  };
-*/
-
-  // Unlock wallet (if locked)
-  const unlockWallet = async () => {
-    setWalletStatus('unlocked');
-    fetchBalances();
-
-    /*
-    try {
-      const res = await fetch(`${proxyUrl}?path=/v1/unlockwallet`, {
-        method: 'POST',
-        body: JSON.stringify({ wallet_password: Buffer.from(walletPassword).toString('base64') }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      
-    } catch (err) {
-      console.error('Unlock error:', err);
-    }*/
-  };
-
-
 
 
   return (
@@ -373,52 +377,42 @@ export default function Home() {
           </div>
         )}
 
-        {/* New Wallet Section */}
         <div className="mt-6">
-          <h2 className="text-xl font-bold mb-4 text-center">Lightning Wallet</h2>
-          
-          {walletStatus === 'locked' ? (
-            <div>
-              <input
-                type="password"
-                value={walletPassword}
-                onChange={(e) => setWalletPassword(e.target.value)}
-                placeholder="Wallet Password"
-                className="w-full p-2 bg-gray-600 rounded text-white mb-2"
-              />
-              <button onClick={unlockWallet} className="w-full px-4 py-2 bg-blue-600 rounded">Unlock Wallet</button>
+          <h2 className="text-xl font-bold mb-4 text-center">Donations</h2>
+          <input
+            type="number"
+            value={donationAmount}
+            onChange={(e) => setDonationAmount(parseInt(e.target.value) || 0)}
+            placeholder="Amount (sat)"
+            className="w-full p-2 bg-gray-600 rounded text-white mb-2"
+          />
+          <button
+            onClick={generateDonationInvoice}
+            disabled={donationAmount <= 0 || paymentStatus === 'pending'}
+            className="w-full px-4 py-2 bg-blue-600 rounded mb-4 disabled:bg-gray-500"
+            title={donationAmount <= 0 ? 'Enter an amount greater than 0' : paymentStatus === 'pending' ? 'Waiting for payment' : ''}
+          >
+            Generate Donation Invoice
+          </button>
+          {bolt11 && (
+            <div className="text-center">
+              <QRCodeCanvas value={bolt11} size={128} className="mx-auto" />
+              <p className="mt-2">Scan to donate {donationAmount} sats</p>
             </div>
-          ) : (
-            <>
-              <button onClick={fetchBalances} className="w-full px-4 py-2 bg-blue-600 rounded mb-4">Refresh Balances</button>
-              <p>Channel Balance: {channelBalance ?? 'Loading...'} sat</p>
-              <p>On-Chain Balance: {onChainBalance ?? 'Loading...'} sat</p>
-
-              {/* Receive */}
-              <input
-                type="number"
-                value={receiveAmount}
-                onChange={(e) => setReceiveAmount(parseInt(e.target.value))}
-                placeholder="Amount (sat)"
-                className="w-full p-2 bg-gray-600 rounded text-white mb-2"
-              />
-              <button /*onClick={createInvoice}*/ className="w-full px-4 py-2 bg-green-600 rounded mb-4">Generate Invoice</button> 
-              {/*invoice && <p>Invoice: {invoice}</p>*/}
-
-              {/* Send */}
-              <input
-                type="text"
-                value={payInvoice}
-                onChange={(e) => setPayInvoice(e.target.value)}
-                placeholder="Bolt11 Invoice"
-                className="w-full p-2 bg-gray-600 rounded text-white mb-2"
-              />
-              <button /*onClick={sendPayment}*/ className="w-full px-4 py-2 bg-red-600 rounded">Send Payment</button>
-            </>
           )}
+          {paymentStatus === 'pending' && <p className="text-yellow-400 mt-2">Payment pending...</p>}
+          {paymentStatus === 'settled' && <p className="text-green-400 mt-2">Payment received! Thank you.</p>}
+          {paymentStatus === 'settled' && (
+            <button
+              onClick={resetDonation}
+              className="w-full mt-2 px-4 py-2 bg-gray-600 rounded text-white hover:bg-gray-700"
+            >
+              Create New Donation
+            </button>
+          )}
+          {donationError && <p className="text-red-400 mt-2">{donationError}</p>}
         </div>
 
-        {/* WhatsApp Chat Button */}
         <button
           onClick={handleWhatsAppClick}
           className="w-full mt-6 px-4 py-2 bg-green-600 rounded text-white hover:bg-green-700 transition-colors"
