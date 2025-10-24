@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "build": "next build && mkdir -p ../functions/.next && cp -r .next ../functions/.next",
+    "build": "next build && rm -rf ../functions/.next && mkdir -p ../functions/.next && cp -r .next/* ../functions/.next/ && cp -r .next/.* ../functions/.next/",
     "deploy": "cd .. && npm run build && firebase deploy",
     "deploy:functions": "cd .. && npm run build && firebase deploy --only functions",
     "start": "next start",
