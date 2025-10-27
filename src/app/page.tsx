@@ -289,7 +289,8 @@ export default function Home() {
           document.execCommand("copy");
           setCopyButtonText("Copied!");
           setTimeout(() => setCopyButtonText("Copy Payment Request"), 2000);
-        } catch (_) {
+        } catch {
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
           throw new Error("Clipboard copy failed via fallback");
         } finally {
           document.body.removeChild(textArea);
