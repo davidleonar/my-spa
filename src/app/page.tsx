@@ -289,7 +289,7 @@ export default function Home() {
           document.execCommand("copy");
           setCopyButtonText("Copied!");
           setTimeout(() => setCopyButtonText("Copy Payment Request"), 2000);
-        } catch (err) {
+        } catch (_) {
           throw new Error("Clipboard copy failed via fallback");
         } finally {
           document.body.removeChild(textArea);
