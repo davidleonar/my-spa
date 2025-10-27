@@ -267,13 +267,36 @@ export default function Home() {
 
   // Maneja el boton de copiar y pegar
   const handleCopyPaymentRequest = async () => {
-    if (!bolt11) return;
+    if (!bolt11) {
+      setCopyButtonText("No Payment Request");
+      setTimeout(() => setCopyButtonText("Copy Payment Request"), 2000);
+      return;
+    }
+  
     try {
-      await navigator.clipboard.writeText(bolt11);
-      setCopyButtonText("Copied!");
-      setTimeout(() => setCopyButtonText("Copy Payment Request"), 2000); // Reset after 2s
+      // Check if Clipboard API is available
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(bolt11);
+        setCopyButtonText("Copied!");
+        setTimeout(() => setCopyButtonText("Copy Payment Request"), 2000);
+      } else {
+        // Fallback for older browsers or non-secure contexts
+        const textArea = document.createElement("textarea");
+        textArea.value = bolt11;
+        document.body.appendChild(textArea);
+        textArea.select();
+        try {
+          document.execCommand("copy");
+          setCopyButtonText("Copied!");
+          setTimeout(() => setCopyButtonText("Copy Payment Request"), 2000);
+        } catch (err) {
+          throw new Error("Clipboard copy failed via fallback");
+        } finally {
+          document.body.removeChild(textArea);
+        }
+      }
     } catch (err) {
-      console.error('Clipboard error:', err);
+      console.error("Clipboard error:", err);
       setCopyButtonText("Copy Failed");
       setTimeout(() => setCopyButtonText("Copy Payment Request"), 2000);
     }
