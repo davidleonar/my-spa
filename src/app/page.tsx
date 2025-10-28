@@ -62,16 +62,15 @@ export default function Home() {
   // State for copy button
   const [copyButtonText, setCopyButtonText] = useState<string>("Copy Payment Request");
 
+  // State for rendering automatico
   const [isClient, setIsClient] = useState(false);
 
-  // Proxy URL from env
-  //const proxyUrl = process.env.LND_PROXY_URL || 'https://us-central1-rendimientos-5dbb9.cloudfunctions.net/lndProxy';
-
+  // Para el rendering automatico
   useEffect(() => {
     setIsClient(true); // Set to true after mounting
   }, []);
 
-  // Fetch BTC/USD price from CoinGecko API every 30 seconds
+  // Fetch BTC/USD price from CoinGecko API every 60 seconds
   useEffect(() => {
     const fetchPrice = async () => {
       try {
@@ -89,7 +88,7 @@ export default function Home() {
     };
 
     fetchPrice(); // Initial fetch
-    const interval = setInterval(fetchPrice, 60000); // Fetch every 30 seconds
+    const interval = setInterval(fetchPrice, 60000); // Fetch every 60 seconds
 
     return () => clearInterval(interval); // Cleanup on unmount
   }, [currentPrice]);
@@ -176,7 +175,10 @@ export default function Home() {
   };
 
 
-  // Notificaciones para el estado de la factura
+
+  /* ------------------------------------------------------------------ */
+  /*  Notificaciones para el estado de la factura                       */
+  /* ------------------------------------------------------------------ */
   useEffect(() => {
     let interval: NodeJS.Timeout;
     let timeout: NodeJS.Timeout;
@@ -222,7 +224,10 @@ export default function Home() {
     };
   }, [paymentHash, paymentStatus]);
 
-  // generar la factura
+
+  /* ------------------------------------------------------------------ */
+  /*  Generar la factura                                                */
+  /* ------------------------------------------------------------------ */
   const generateDonationInvoice = async () => {
     if (donationAmount <= 0) {
       setDonationError('Amount must be greater than 0');
