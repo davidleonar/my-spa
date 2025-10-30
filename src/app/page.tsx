@@ -197,7 +197,7 @@ const handleSignOut = () => auth.signOut();
         `https://us-central1-rendimientos-5dbb9.cloudfunctions.net/getDataById?id=${id}`,
         { method: "GET",
           headers: {
-            'Authorization': `Bearer ${idToken}`, // <-- This is the crucial part
+            Authorization: `Bearer ${idToken}`, // <-- This is the crucial part
          }}
       );
       if (!response.ok) {
