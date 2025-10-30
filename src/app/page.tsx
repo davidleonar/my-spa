@@ -198,7 +198,6 @@ const handleSignOut = () => auth.signOut();
         { method: "GET",
           headers: {
             'Authorization': `Bearer ${idToken}`, // <-- This is the crucial part
-            'Content-Type': 'application/json'
          }}
       );
       if (!response.ok) {
