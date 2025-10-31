@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "DPS Direct Provider Services",
-  description: "Asegura tus cripto activos con David",
+  title: "Rendimientos App",
+  description: "Ahorra BTC de manera soberana",
 };
 
 export default function RootLayout({
@@ -27,14 +27,14 @@ export default function RootLayout({
     <html>
       <Head>
         <link rel="icon" href="/logo.png" />
-        <meta property="og:title" content="DPS Direct Provider Services" />
-        <meta property="og:description" content="Asegura tus cripto activos con David" />
+        <meta property="og:title" content="Rendimientos App" />
+        <meta property="og:description" content="Ahorra BTC de manera soberana" />
         <meta property="og:image" content="/logo.png" />
         <meta property="og:url" content="https://rendimientos-5dbb9.web.app/" />
         <meta property="og:type" content="website" />
         <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content="DPS Direct Provider Services" />
-        <meta name="twitter:description" content="Asegura tus cripto activos con David" />
+        <meta name="twitter:title" content="Rendimientos App" />
+        <meta name="twitter:description" content="Ahorra BTC de manera soberana" />
         <meta name="twitter:image" content="/logo.png" />
       </Head>
       <body

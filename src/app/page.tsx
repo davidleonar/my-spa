@@ -2,6 +2,17 @@
 import { useState, useEffect } from "react";
 import '../app/globals.css';
 import { ArrowsUpDownIcon } from '@heroicons/react/24/outline';
+import { QRCodeCanvas } from 'qrcode.react'; 
+import { auth } from '../app/lib/firebase'; // Adjust path
+import {
+  signInWithEmailAndPassword, createUserWithEmailAndPassword, UserCredential
+} from 'firebase/auth';
+import { useAuthState } from 'react-firebase-hooks/auth'; // npm install react-firebase-hooks
+//import { text } from "stream/consumers";
+
+import { getAuth } from 'firebase/auth';
+
+export const dynamic = 'force-dynamic';
 
 // Interface for balance data (from getDataById)
 interface SpreadsheetRow {
@@ -27,6 +38,16 @@ interface MovementRow {
   [key: string]: string | null;
 }
 
+// Interface for invoices
+interface InvoiceStatus {
+  r_hash: string;  // Base64-encoded hash (for verification)
+  state: number;   // 2 = SETTLED (per LND enum: https://docs.lightning.engineering/reference/types?ref=docs.lightning.engineering#InvoiceState)
+  settled: boolean;
+  settle_date: string;  // Unix timestamp when settled
+  amt_paid_sat: string; // Amount paid in satoshis
+  // ... other fields as needed
+}
+
 export default function Home() {
   const [id, setId] = useState<string>("");
   const [data, setData] = useState<SpreadsheetRow[]>([]);
@@ -39,7 +60,94 @@ export default function Home() {
   // State for sort order in movements
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
-  // Fetch BTC/USD price from CoinGecko API every 10 seconds
+  // States for donations
+  const [donationAmount, setDonationAmount] = useState<number>(1000); // Default 1000 sats
+  const [bolt11, setBolt11] = useState<string | null>(null);
+  const [paymentHash, setPaymentHash] = useState<string | null>(null);
+  const [paymentStatus, setPaymentStatus] = useState<'pending' | 'settled' | null>(null);
+  const [donationError, setDonationError] = useState<string | null>(null);
+
+  // State for copy button
+  const [copyButtonText, setCopyButtonText] = useState<string>("Copy Payment Request");
+
+  // State for rendering automatico
+  const [isClient, setIsClient] = useState(false);
+
+  //States para login
+  const [user, loadingAuth, errorAuth] = useAuthState(auth);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  //const [phone, setPhone] = useState('');
+  //const [verificationCode, setVerificationCode] = useState(''); // ← Now used in phone confirmation
+
+  // Para el rendering automatico
+  useEffect(() => {
+    setIsClient(true); // Set to true after mounting
+  }, []);
+
+  // Sign-up/Login with Email
+  const handleEmailSignUp = async () => {
+    try {
+      const userCredential: UserCredential = await createUserWithEmailAndPassword(auth, email, password);
+      console.log('User created:', userCredential.user);
+      setError(null); // Clear previous errors on success
+    } catch (err) {
+      const error = err as Error; // Cast to Error
+      setError(error.message);
+    }
+  };
+
+  const handleEmailLogin = async () => {
+    try {
+      const userCredential: UserCredential = await signInWithEmailAndPassword(auth, email, password);
+      console.log('Logged in:', userCredential.user);
+      setError(null); // Clear previous errors on success
+    } catch (err) {
+      const error = err as Error;
+      setError(error.message);
+    }
+  };
+  /*
+  // Phone Auth (requires reCAPTCHA)
+    useEffect(() => {
+      if (typeof window !== 'undefined') {
+        window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', { size: 'invisible' });
+      }
+    }, []);
+
+    const handlePhoneLogin = async () => {
+      try {
+        const confirmation = await signInWithPhoneNumber(auth, phone, window.recaptchaVerifier);
+        const code = verificationCode; // ← Use state (or prompt for testing)
+        if (code) await confirmation.confirm(code);
+      } catch (err) {
+        const error = err as Error;
+        setError(error.message);
+      }
+    };
+  */
+  /* OAuth Providers
+  const handleOAuthLogin = async (provider: AuthProvider) => {
+    try {
+      const result: UserCredential = await signInWithPopup(auth, provider);
+      console.log('OAuth user:', result.user);
+    } catch (err) {
+      const error = err as Error;
+      setError(error.message);
+    }
+  };
+  */
+
+  // Usage examples:
+
+// Apple: handleOAuthLogin(new AppleAuthProvider()); poner en el import, no olvidar "AppleAuthProvider()"
+// Twitter: handleOAuthLogin(new TwitterAuthProvider());
+// Microsoft: const msProvider = new OAuthProvider('microsoft.com'); handleOAuthLogin(msProvider);
+
+// Sign out
+const handleSignOut = () => auth.signOut();
+
+  // Fetch BTC/USD price from CoinGecko API every 60 seconds
   useEffect(() => {
     const fetchPrice = async () => {
       try {
@@ -57,7 +165,7 @@ export default function Home() {
     };
 
     fetchPrice(); // Initial fetch
-    const interval = setInterval(fetchPrice, 10000); // Fetch every 10 seconds
+    const interval = setInterval(fetchPrice, 600000); // Fetch every 60 seconds
 
     return () => clearInterval(interval); // Cleanup on unmount
   }, [currentPrice]);
@@ -77,14 +185,27 @@ export default function Home() {
     setError(null);
     setMovements([]); // Reset movements when fetching new balance data
     try {
+
+      const auth = getAuth();
+      const user = auth.currentUser;
+
+      if (!user) throw new Error("User not authenticated");
+
+      // 1. Get the Firebase ID token from the logged-in user.
+      const idToken = await user.getIdToken();
+
       const response = await fetch(
         `https://us-central1-rendimientos-5dbb9.cloudfunctions.net/getDataById?id=${id}`,
-        { method: "GET" }
+        { method: "GET",
+          headers: {
+            Authorization: `Bearer ${idToken}`, // <-- This is the crucial part
+         }}
       );
       if (!response.ok) {
         throw new Error(`HTTP error! Status: ${response.status}`);
       }
       const result = await response.json();
+      console.log("Successfully fetched data:", result);
       setData(result.data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch data");
@@ -97,14 +218,26 @@ export default function Home() {
     setLoading(true);
     setError(null);
     try {
+      const auth = getAuth();
+      const user = auth.currentUser;
+
+      if (!user) throw new Error("User not authenticated");
+
+      // 1. Get the Firebase ID token from the logged-in user.
+      const idToken = await user.getIdToken();
+
       const response = await fetch(
         `https://us-central1-rendimientos-5dbb9.cloudfunctions.net/getMovementsById?id=${id}`,
-        { method: "GET" }
+        { method: "GET",
+          headers: {
+            Authorization: `Bearer ${idToken}`, // <-- This is the crucial part
+         }}
       );
       if (!response.ok) {
         throw new Error(`HTTP error! Status: ${response.status}`);
       }
       const result = await response.json();
+      console.log("Successfully fetched data:", result);
       setMovements(result.data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch movements");
@@ -143,19 +276,258 @@ export default function Home() {
     window.open(`https://wa.me/${phoneNumber}?text=${message}`, '_blank');
   };
 
+
+
+  /* ------------------------------------------------------------------ */
+  /*  Notificaciones para el estado de la factura                       */
+  /* ------------------------------------------------------------------ */
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    let timeout: NodeJS.Timeout;
+
+    if (paymentHash && paymentStatus === 'pending') {
+      interval = setInterval(async () => {
+        try {
+          // Proxy through your existing LND route: /v1/invoice/{paymentHash}
+          const res = await fetch(`/api/lndProxy/v1/invoice/${paymentHash}`);
+          if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to check invoice`);
+          
+          const invoice: InvoiceStatus = await res.json();
+          
+          // Check settled status (LND uses 'settled' boolean directly)
+          if (invoice.settled) {
+            setPaymentStatus('settled');
+            console.log('Payment settled! Amount:', invoice.amt_paid_sat, 'sats');
+
+            // Show success toast (optional: replace with toast library later)
+            alert(`¡Pago recibido! ${Number(invoice.amt_paid_sat)} sats`);
+
+            // Auto-reset after 3 seconds
+            setTimeout(() => {
+            resetDonation();
+            }, 3000);
+          }
+        } catch (error) {
+          console.error('Check status error:', error);
+          setDonationError('Failed to check payment status');
+          // Don't stop polling on transient errors
+        }
+      }, 10000); // Poll every 10s
+  
+      // Timeout after 5 min
+      timeout = setTimeout(() => {
+        setPaymentStatus(null);
+        setDonationError('Payment check timed out');
+        clearInterval(interval);
+      }, 300000);
+    }
+    return () => {
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
+  }, [paymentHash, paymentStatus]);
+
+
+  /* ------------------------------------------------------------------ */
+  /*  Generar la factura                                                */
+  /* ------------------------------------------------------------------ */
+  const generateDonationInvoice = async () => {
+    if (donationAmount <= 0) {
+      setDonationError('Amount must be greater than 0');
+      return;
+    }
+    setDonationError(null);
+    setPaymentStatus('pending');
+    setLoading(true);
+
+    try {
+
+      // 1. Get the Firebase ID token from the logged-in user.
+      const value_msat = donationAmount * 1000;
+      const body = {
+        value_msat: value_msat,
+        memo: 'Donation from App',
+        expiry: '300',
+        private: false,
+        add_index: 1,
+      };
+      console.log('Sending donation request:', body);
+      const res = await fetch('/api/lndProxy/v1/invoices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('Proxy error:', errorText);
+        throw new Error(`Server error: ${res.status}`);
+      }
+  
+      const data = await res.json();
+      console.log("LND response:", data);
+
+      if (data.payment_request) {
+        setBolt11(data.payment_request);
+        setPaymentHash(Buffer.from(data.r_hash, 'base64').toString('hex'));;
+        setPaymentStatus("pending");
+        console.log("Set bolt11:", data.payment_request);
+      } else {
+        throw new Error("No payment_request in LND response");
+      }
+    
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Unknown error';
+      console.error("Donation invoice error:", e);
+      setDonationError(message);
+      setPaymentStatus(null);
+    } finally {
+      setLoading(false);
+    }
+};
+
+  // Maneja el boton de copiar y pegar
+  const handleCopyPaymentRequest = async () => {
+    if (!bolt11) {
+      setCopyButtonText("No Payment Request");
+      setTimeout(() => setCopyButtonText("Copy Payment Request"), 2000);
+      return;
+    }
+  
+    try {
+      // Check if Clipboard API is available
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(bolt11);
+        setCopyButtonText("Copied!");
+        setTimeout(() => setCopyButtonText("Copy Payment Request"), 2000);
+      } else {
+        // Fallback for older browsers or non-secure contexts
+        const textArea = document.createElement("textarea");
+        textArea.value = bolt11;
+        document.body.appendChild(textArea);
+        textArea.select();
+        try {
+          document.execCommand("copy");
+          setCopyButtonText("Copied!");
+          setTimeout(() => setCopyButtonText("Copy Payment Request"), 2000);
+        } catch {
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          throw new Error("Clipboard copy failed via fallback");
+        } finally {
+          document.body.removeChild(textArea);
+        }
+      }
+    } catch (err) {
+      console.error("Clipboard error:", err);
+      setCopyButtonText("Copy Failed");
+      setTimeout(() => setCopyButtonText("Copy Payment Request"), 2000);
+      }
+  };
+
+  const resetDonation = () => {
+    setDonationAmount(1000);
+    setBolt11(null);
+    setPaymentHash(null);
+    setPaymentStatus(null);
+    setDonationError(null);
+    setLoading(false);
+  };
+
+  /*
+  if (loadingAuth) {
+    return <div className="flex justify-center items-center h-screen">Loading authentication...</div>;
+  }
+  */
+ 
   return (
     <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center p-4">
       <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-full max-w-md">
-        {/* BTC/USD Price Banner */}
-        {currentPrice !== null ? (
-          <div className={`mb-4 p-2 rounded text-center ${getColorClass()}`}>
-            <p>BTC/USD: ${currentPrice.toLocaleString()}</p>
+
+      {loadingAuth ? (
+          <p className="text-center">Cargando autenticación...</p>
+        ) : user ? (
+          <div className="text-center mb-4">
+            <p>Bienvenido, {user.displayName || user.email}!</p>
+            <button onClick={handleSignOut} className="px-4 py-2 bg-red-600 rounded text-white hover:bg-red-700">
+              Cerrar Sesión
+            </button>
           </div>
         ) : (
-          <div className="mb-4 p-2 rounded text-center text-gray-400">
-            <p>Loading BTC price...</p>
+          <div className="mt-6 p-4 bg-gray-800 rounded">
+            <h2 className="text-xl font-bold mb-4 text-center">Iniciar Sesión / Registrarse</h2>
+            
+            {/* Email/Password */}
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)} // ← Use setEmail
+              placeholder="Email"
+              className="w-full p-2 bg-gray-600 rounded text-white mb-2"
+            />
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)} // ← Use setPassword
+              placeholder="Contraseña"
+              className="w-full p-2 bg-gray-600 rounded text-white mb-2"
+            />
+            <button onClick={handleEmailLogin} className="w-full px-4 py-2 bg-blue-600 rounded text-white mb-2">
+              Iniciar Sesión con Email
+            </button>
+            <button onClick={handleEmailSignUp} className="w-full px-4 py-2 bg-green-600 rounded text-white mb-4">
+              Registrarse con Email
+            </button>
+            
+            {/* Phone  <input
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)} // ← Use setPhone
+              placeholder="Número de Teléfono (e.g., +1234567890)"
+              className="w-full p-2 bg-gray-600 rounded text-white mb-2"
+            />
+            <button onClick={handlePhoneLogin} className="w-full px-4 py-2 bg-blue-600 rounded text-white mb-4">
+              Iniciar Sesión con Teléfono
+            </button>
+             */}
+           
+            {/* If SMS code prompted, add input (handle in handlePhoneLogin or separate state) */}
+            {/* verificationCode && ( // ← Conditional to show code input after SMS sent
+              <input
+                type="text"
+                value={verificationCode}
+                onChange={(e) => setVerificationCode(e.target.value)} // ← Use setVerificationCode
+                placeholder="Código de Verificación"
+                className="w-full p-2 bg-gray-600 rounded text-white mb-2"
+              />
+            )*/}
+            
+            {/* OAuth Buttons  <button onClick={} className="w-full px-4 py-2 bg-black rounded text-white mb-2">
+              Iniciar con Apple
+            </button>
+            <button onClick={() => handleOAuthLogin(new TwitterAuthProvider())} className="w-full px-4 py-2 bg-blue-400 rounded text-white mb-2">
+              Iniciar con Twitter
+            </button>
+            <button onClick={() => handleOAuthLogin(new OAuthProvider('microsoft.com'))} className="w-full px-4 py-2 bg-purple-600 rounded text-white">
+              Iniciar con Microsoft
+            </button>*/}
+          
+            
+            {errorAuth && <p className="text-red-400 mt-2">{errorAuth.message} - // ← Use errorAuth</p>} 
           </div>
         )}
+        {/* Add reCAPTCHA container (hidden) */}
+        <div id="recaptcha-container" className="hidden"></div>
+
+          {/* BTC/USD Price Banner */}
+          {currentPrice !== null ? (
+            <div className={`mb-4 p-2 rounded text-center ${getColorClass()}`}>
+              <p>BTC/USD: ${currentPrice.toLocaleString()}</p>
+            </div>
+          ) : (
+            <div className="mb-4 p-2 rounded text-center text-gray-400">
+              <p>Loading BTC price...</p>
+            </div>
+          )}
 
         <h1 className="text-2xl font-bold mb-4 text-center">Saldos de Cuenta</h1>
         <form onSubmit={handleSubmit} className="flex items-center space-x-2 mb-4">
@@ -279,13 +651,61 @@ export default function Home() {
           </div>
         )}
 
-        {/* WhatsApp Chat Button */}
+        <div className="mt-6">
+          <h2 className="text-xl font-bold mb-4 text-center">Donations</h2>
+          <input
+            type="number"
+            value={donationAmount}
+            onChange={(e) => setDonationAmount(parseInt(e.target.value) || 1000)}
+            placeholder="Amount (sat)"
+            className="w-full p-2 bg-gray-600 rounded text-white mb-2"
+          />
+          <button
+            onClick={generateDonationInvoice}
+            disabled={donationAmount <= 0 || paymentStatus === 'pending'}
+            className="w-full px-4 py-2 bg-blue-600 rounded mb-4 disabled:bg-gray-500"
+            title={donationAmount <= 0 ? 'Enter an amount greater than 0' : paymentStatus === 'pending' ? 'Waiting for payment' : ''}
+          >
+            Generate Donation Invoice
+            </button>
+          {loading && (
+            <div className="flex justify-center mt-4"></div>
+          )}
+          {isClient && bolt11 && (
+            <div className="text-center">
+              <QRCodeCanvas value={bolt11} size={128} className="mx-auto" />
+              <p className="mt-2">Scan to donate {donationAmount} sats</p>
+              <p className="mt-4 text-sm text-gray-300 break-all px-4">
+                Payment Request: {bolt11}
+              </p>
+              <button
+                onClick={handleCopyPaymentRequest}
+                className="mt-2 px-4 py-2 bg-gray-600 rounded text-white hover:bg-gray-700 transition-colors"
+              >
+                {copyButtonText}
+              </button>
+          </div>
+          )}
+          {paymentStatus === 'pending' && <p className="text-yellow-400 mt-2">Payment pending...</p>}
+          {paymentStatus === 'settled' && <p className="text-green-400 mt-2">Payment received! Thank you.</p>}
+          {paymentStatus === 'settled' && (
+            <button
+              onClick={resetDonation}
+              className="w-full mt-2 px-4 py-2 bg-gray-600 rounded text-white hover:bg-gray-700"
+            >
+              Create New Donation
+            </button>
+          )}
+          {donationError && <p className="text-red-400 mt-2">{donationError}</p>}
+        </div>
+
         <button
           onClick={handleWhatsAppClick}
           className="w-full mt-6 px-4 py-2 bg-green-600 rounded text-white hover:bg-green-700 transition-colors"
         >
           Contacto
         </button>
+      
       </div>
     </div>
   );
