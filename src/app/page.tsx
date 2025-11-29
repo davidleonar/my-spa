@@ -712,11 +712,17 @@ const handleSignOut = () => {
       setWithdrawalBankName('');
       setWithdrawalAmount('');
       alert('Withdrawal request submitted successfully!');
-    } catch (error) {
-      console.error('Error submitting withdrawal request:', error);
-      alert('Failed to submit withdrawal request.');
+    } catch (err: unknown) {  // Change 'any' to 'unknown'
+      console.error('Error submitting withdrawal:', err);
+      let userMessage = 'Failed to submit withdrawal. Please try again.';
+      if (err instanceof Error && err.message === 'PERMISSION_DENIED') {  // Narrow type via guards
+        userMessage = 'Access denied: You may not have permission for this action. Please check your login.';
+      } else if (err instanceof Error && err.message?.includes('auth')) {
+        userMessage = 'Authentication error: Please sign in again.';
+      }
+      alert(userMessage);
     }
-  };
+};
 
   const handleIntWithdrawalSubmit = async () => {
     if (!user) {
@@ -749,11 +755,17 @@ const handleSignOut = () => {
       setWithdrawalCountry('');
       setWithdrawalAmount('');
       alert('International withdrawal request submitted successfully!');
-    } catch (error) {
-      console.error('Error submitting international withdrawal request:', error);
-      alert('Failed to submit international withdrawal request.');
+    } catch (err: unknown) {  // Change 'any' to 'unknown'
+      console.error('Error submitting withdrawal:', err);
+      let userMessage = 'Failed to submit withdrawal. Please try again.';
+      if (err instanceof Error && err.message === 'PERMISSION_DENIED') {  // Narrow type via guards
+        userMessage = 'Access denied: You may not have permission for this action. Please check your login.';
+      } else if (err instanceof Error && err.message?.includes('auth')) {
+        userMessage = 'Authentication error: Please sign in again.';
+      }
+      alert(userMessage);
     }
-  };
+};
 
 
 
