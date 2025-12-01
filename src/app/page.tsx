@@ -24,6 +24,8 @@ import { Buffer } from 'buffer';
 import ReactCountryFlag from 'react-country-flag';
 import { countries } from 'countries-list';
 import Image from 'next/image';
+import { ethers } from 'ethers';
+import detectEthereumProvider from '@metamask/detect-provider';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,6 +52,12 @@ interface MovementRow {
   Operacion: string;
   [key: string]: string | null;
 }
+
+const USDT_ABI = [
+  "function transfer(address to, uint256 value) public returns (bool)",
+  "function decimals() public view returns (uint8)",
+  "function balanceOf(address owner) public view returns (uint256)"  // Add this line
+];
 
 // Interface for invoices
 interface InvoiceStatus {
@@ -86,10 +94,11 @@ export default function Home() {
   // State for copy button
   const [copyButtonText, setCopyButtonText] = useState<string>("Copy Payment Request");
   const [copySavingsButtonText, setCopySavingsButtonText] = useState<string>("Copy Payment Request");
+  const [copySavingsButtonTextusdt, setCopySavingsButtonTextusdt] = useState<string>("Copy USDT Polygon Address");
 
   // States for savings
   const [showSavings, setShowSavings] = useState<boolean>(false);
-  const [savingsOption, setSavingsOption] = useState<'bancosColombia' | 'btcLightning' | 'bancosEuropa' | 'bancosUSA' | null>(null);
+  const [savingsOption, setSavingsOption] = useState<'bancosColombia' | 'btcLightning' | 'bancosEuropa' | 'bancosUSA' | 'usdtPolygon' | null>(null);
   const [savingsAmount, setSavingsAmount] = useState<number>(1000);
   const [savingsBolt11, setSavingsBolt11] = useState<string | null>(null);
   const [savingsPaymentStatus, setSavingsPaymentStatus] = useState<'pending' | 'settled' | null>(null);
@@ -120,9 +129,16 @@ export default function Home() {
   //const [phone, setPhone] = useState('');
   //const [verificationCode, setVerificationCode] = useState(''); // ← Now used in phone confirmation
 
+  const [usdtSavingsAmount, setUsdtSavingsAmount] = useState<number>(0); // Amount in USDT (e.g., 10.00)
+  const [usdtTxHash, setUsdtTxHash] = useState<string | null>(null); // Transaction hash for tracking
+  const [usdtPaymentStatus, setUsdtPaymentStatus] = useState<'pending' | 'confirmed' | null>(null);
+  const [walletConnected, setWalletConnected] = useState<boolean>(false);
+  const [usdtError, setUsdtError] = useState<string | null>(null);
+
   // Para el rendering automatico
   useEffect(() => {
     setIsClient(true); // Set to true after mounting
+    console.warn('Missing env:', !process.env.NEXT_PUBLIC_USDT_CONTRACT_ADDRESS && 'USDT address')
 
     // Handle redirect result for OAuth
     getRedirectResult(auth).then((result) => {
@@ -680,6 +696,40 @@ const handleSignOut = () => {
       }
   };
 
+  const handleCopySavingsRequestusdt = async () => {
+    if (!process.env.NEXT_PUBLIC_APP_WALLET_ADDRESS) {
+      setCopySavingsButtonTextusdt("No USDT Address");
+      setTimeout(() => setCopySavingsButtonTextusdt("Copy Payment Request"), 2000);
+      return;
+    }
+  
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(process.env.NEXT_PUBLIC_APP_WALLET_ADDRESS);
+        setCopySavingsButtonTextusdt("Copied!");
+        setTimeout(() => setCopySavingsButtonTextusdt("Copy USDT Address"), 2000);
+      } else {
+        const textArea = document.createElement("textarea");
+        textArea.value = process.env.NEXT_PUBLIC_APP_WALLET_ADDRESS;
+        document.body.appendChild(textArea);
+        textArea.select();
+        try {
+          document.execCommand("copy");
+          setCopySavingsButtonTextusdt("Copied!");
+          setTimeout(() => setCopySavingsButtonTextusdt("Copy USDT Address"), 2000);
+        } catch {
+          throw new Error("Clipboard copy failed via fallback");
+        } finally {
+          document.body.removeChild(textArea);
+        }
+      }
+    } catch (err) {
+      console.error("Clipboard error:", err);
+      setCopySavingsButtonTextusdt("Copy Failed");
+      setTimeout(() => setCopySavingsButtonTextusdt("Copy USDT Address"), 2000);
+      }
+  };
+
   const handleWithdrawalSubmit = async () => {
     if (!user) {
       // Handle not logged in user
@@ -765,6 +815,143 @@ const handleSignOut = () => {
       }
       alert(userMessage);
     }
+};
+
+  const connectWallet = async () => {
+  const provider = await detectEthereumProvider();
+  if (provider && window.ethereum) { // Check both for safety
+    try {
+      await window.ethereum.request({ method: 'eth_requestAccounts' }); // Use typed window.ethereum
+      await switchToPolygon();
+      setWalletConnected(true);
+      setUsdtError(null);
+      console.log('Wallet connected and switched to Polygon.');
+    } catch (err: unknown) {
+      const error = err as Error;
+      setUsdtError(error.message || 'Connection failed. Please try again.');
+    }
+  } else {
+    setUsdtError('MetaMask not detected. Please install the extension.');
+  }
+};
+
+const switchToPolygon = async () => {
+  try {
+    await window.ethereum?.request({ // Optional chaining for safety
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: '0x89' }],
+    });
+  } catch (switchError: unknown) {
+    const error = switchError as { code?: number }; // Narrow to expected shape
+    if (error.code === 4902) { // Chain not added
+      await window.ethereum?.request({
+        method: 'wallet_addEthereumChain',
+        params: [{
+          chainId: '0x89',
+          chainName: 'Polygon Mainnet',
+          rpcUrls: [process.env.NEXT_PUBLIC_POLYGON_RPC_URL!],
+          nativeCurrency: { name: 'MATIC', symbol: 'MATIC', decimals: 18 },
+          blockExplorerUrls: ['https://polygonscan.com/'],
+        }],
+      });
+    } else {
+      throw switchError;
+    }
+  }
+};
+
+const initiateUsdtDeposit = async () => {
+  setUsdtError(null);
+  if (!window.ethereum) {
+    setUsdtError('MetaMask not connected. Please connect your wallet first.');
+    return;
+  }
+  console.log('Initiating USDT deposit of', usdtSavingsAmount, 'USDT');
+  try {
+    const signerProvider = new ethers.BrowserProvider(window.ethereum);
+    const signer = await signerProvider.getSigner();
+    const usdtContract = new ethers.Contract(process.env.NEXT_PUBLIC_USDT_CONTRACT_ADDRESS!, USDT_ABI, signer);
+
+    console.log('USDT Contract address:', usdtContract.address);
+    
+    // Pre-check balance (teaching: read-only call, no gas)
+    const userAddress = await signer.getAddress();
+    const balance = await usdtContract.balanceOf(userAddress);
+    const amountWei = ethers.parseUnits(usdtSavingsAmount.toString(), 6);
+    if (balance < amountWei) {
+      throw new Error(`Insufficient USDT balance. You have ${ethers.formatUnits(balance, 6)} USDT available.`);
+    }
+
+    const tx = await usdtContract.transfer(
+      process.env.NEXT_PUBLIC_APP_WALLET_ADDRESS!,
+      amountWei
+    );
+    console.log('USDT deposit transaction sent. Hash:', tx.hash);
+    setUsdtTxHash(tx.hash);
+    setUsdtPaymentStatus('pending');
+
+  
+    const receipt = await pollReceipt(tx.hash, 1);
+    console.log('USDT deposit confirmed in block', receipt.blockNumber);
+    console.log('Transaction receipt:', receipt);
+    setUsdtPaymentStatus('confirmed');
+
+    // Record deposit in backend
+    await fetch('/api/recordUsdtDeposit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ txHash: tx.hash, amount: usdtSavingsAmount, userId: user?.uid }),
+    });
+  } catch (err: unknown) {
+    const error = err as Error;
+    let message = error.message || 'Deposit failed. Check wallet balance/gas.';
+    if (message.includes('exceeds balance') || message.includes('Insufficient USDT balance')) {
+      message = 'Insufficient USDT balance in your wallet on Polygon. Please add funds and retry.';
+    } else if (error.name === 'CALL_EXCEPTION') {
+      message = `Contract revert: ${error.message || 'Unknown error'}`;
+    } else if (message.includes('user rejected')) {
+      message = 'Transaction rejected by user.';
+    } else if (message.includes('BAD_DATA')) {                                // Revisar errores comunes de ethers.js
+      //const fallbackProvider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_POLYGON_RPC_URL!);
+      //const receipt = await fallbackProvider.waitForTransaction(tx.hash, 1);
+      //const signer = await fallbackProvider.getSigner();
+      /*const tx = await signer.
+      if (receipt?.status !== 1) {
+        throw new Error('Transaction failed on-chain');
+      }
+        */
+      message = 'Deposit will be processed shortly. Please check back later.';
+      setUsdtPaymentStatus('confirmed');
+    }
+    console.error('USDT deposit error:', error);
+    setUsdtError(message);
+    setUsdtPaymentStatus(null);
+  }
+};
+
+ const pollReceipt = async (hash: string, confirmations = 1, timeoutMs = 60000): Promise<ethers.TransactionReceipt> => {
+  const start = Date.now();
+  const provider = new ethers.JsonRpcProvider(process.env.NEXT_PUBLIC_POLYGON_RPC_URL!);
+
+  while (Date.now() - start < timeoutMs) {
+    const receipt = await provider.getTransactionReceipt(hash);
+
+    if (receipt) {
+      // Compute confirmations from block numbers (avoids receipt.confirmations union type)
+      let confirmedCount = 0;
+      if (typeof receipt.blockNumber === 'number') {
+        const currentBlock = await provider.getBlockNumber();
+        confirmedCount = currentBlock - receipt.blockNumber + 1;
+      }
+      if (receipt.status === 1 && confirmedCount >= confirmations) {
+        return receipt;
+      } else if (receipt.status === 0) {
+        throw new Error('Transaction reverted on-chain');
+      }
+    }
+    await new Promise(resolve => setTimeout(resolve, 2000)); // Poll every 2s
+  }
+  throw new Error('Confirmation timeout');
 };
 
 
@@ -1024,6 +1211,14 @@ const handleSignOut = () => {
                   >
                     Bancos USA
                   </button>
+                  <button
+                    onClick={() => setSavingsOption('usdtPolygon')}
+                    className={`px-4 py-2 rounded ${
+                      savingsOption === 'usdtPolygon' ? 'bg-blue-600' : 'bg-gray-600'
+                    } text-white hover:bg-blue-700 transition-colors`}
+                  >
+                    USDT (Polygon)
+                  </button>
                 </div>
 
                 {savingsOption === 'bancosColombia' && (
@@ -1103,6 +1298,60 @@ const handleSignOut = () => {
                     {savingsError && <p className="text-red-400 mt-2">{savingsError}</p>}
                   </div>
                 )}
+
+                {savingsOption === 'usdtPolygon' && (
+                  <div className="mt-4">
+                    <h3 className="text-lg font-semibold mb-2 text-center">Savings (USDT on Polygon)</h3>
+                    <input
+                      type="number"
+                      value={usdtSavingsAmount}
+                      onChange={(e) => setUsdtSavingsAmount(parseFloat(e.target.value) || 10)}
+                      placeholder="Amount (USDT)"
+                      className="w-full p-2 bg-gray-600 rounded text-white mb-2"
+                    />
+                    <div className="text-center mt-4">
+                      <p className="text-sm text-gray-300">Send manually to: {process.env.NEXT_PUBLIC_APP_WALLET_ADDRESS}</p>
+                      <button
+                          onClick={handleCopySavingsRequestusdt}
+                          className="mt-2 px-4 py-2 bg-gray-600 rounded text-white hover:bg-gray-700 transition-colors"
+                        >
+                          {copySavingsButtonTextusdt}
+                        </button>
+                        <div className="text-center mt-4">
+                      <p className="text-sm text-gray-300">Or scan the QR on your wallet app</p>
+                    </div>
+                      <QRCodeCanvas value={`ethereum:${process.env.NEXT_PUBLIC_APP_WALLET_ADDRESS}?value=${usdtSavingsAmount}&chain=137&token=${process.env.NEXT_PUBLIC_USDT_CONTRACT_ADDRESS}`} size={128} className="mx-auto" />
+                    </div>
+
+                    <div className="text-center mt-4">
+                      <p className="text-sm text-gray-300">Or connect your wallet to deposit USDT</p>
+                    </div>
+                    
+                    {!walletConnected ? (
+                      <button onClick={connectWallet} className="w-full px-4 py-2 bg-blue-600 rounded mb-4">
+                        Connect MetaMask
+                      </button>
+                    ) : (
+                      <button
+                        onClick={initiateUsdtDeposit}
+                        disabled={usdtSavingsAmount <= 0 || usdtPaymentStatus === 'pending'}
+                        className="w-full px-4 py-2 bg-blue-600 rounded mb-4 disabled:bg-gray-500"
+                        title={usdtSavingsAmount <= 0 ? 'Enter an amount greater than 0' : usdtPaymentStatus === 'pending' ? 'Transaction pending' : ''}
+                      >
+                        Deposit USDT
+                      </button>
+                    )}
+                    {usdtTxHash && (
+                      <p className="text-sm text-gray-300 break-all">
+                        Tx Hash: {usdtTxHash} (<a href={`https://polygonscan.com/tx/${usdtTxHash}`} target="_blank" rel="noopener noreferrer" className="text-blue-400">View on PolygonScan</a>)
+                      </p>
+                    )}
+                    {usdtPaymentStatus === 'pending' && <p className="text-yellow-400 mt-2">Transaction pending...</p>}
+                    {usdtPaymentStatus === 'confirmed' && <p className="text-green-400 mt-2">Deposit confirmed! Balance updating soon.</p>}
+                    {usdtError && <p className="text-red-400 mt-2">{usdtError}</p>}
+                  </div>
+                )}
+
               </div>
             )}
           </div>
