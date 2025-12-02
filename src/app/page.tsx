@@ -98,7 +98,7 @@ export default function Home() {
 
   // States for savings
   const [showSavings, setShowSavings] = useState<boolean>(false);
-  const [savingsOption, setSavingsOption] = useState<'bancosColombia' | 'btcLightning' | 'bancosEuropa' | 'bancosUSA' | 'usdtPolygon' | null>(null);
+  const [savingsOption, setSavingsOption] = useState<'bancosColombia' | 'btcLightning' | 'bancosEuropa' | 'bancosUSA' | 'usdtPolygon' | 'usdtTron' | null>(null);
   const [savingsAmount, setSavingsAmount] = useState<number>(1000);
   const [savingsBolt11, setSavingsBolt11] = useState<string | null>(null);
   const [savingsPaymentStatus, setSavingsPaymentStatus] = useState<'pending' | 'settled' | null>(null);
@@ -134,6 +134,13 @@ export default function Home() {
   const [usdtPaymentStatus, setUsdtPaymentStatus] = useState<'pending' | 'confirmed' | null>(null);
   const [walletConnected, setWalletConnected] = useState<boolean>(false);
   const [usdtError, setUsdtError] = useState<string | null>(null);
+
+  const [usdtTronSavingsAmount, setUsdtTronSavingsAmount] = useState<number>(30); // Amount in USDT (e.g., 10.00)
+  const [usdtTronTxHash, setUsdtTronTxHash] = useState<string | null>(null); // Transaction hash for tracking
+  const [usdtTronPaymentStatus, setUsdtTronPaymentStatus] = useState<'pending' | 'confirmed' | null>(null);
+  const [tronWalletConnected, setTronWalletConnected] = useState<boolean>(false);
+  const [usdtTronError, setUsdtTronError] = useState<string | null>(null);
+  const [copySavingsButtonTextusdtTron, setCopySavingsButtonTextusdtTron] = useState<string>("Copy USDT TRON Address");
 
   // Para el rendering automatico
   useEffect(() => {
@@ -176,6 +183,7 @@ export default function Home() {
         });
     }
   }
+  connectTronWallet();
   }, []);
 
   const actionCodeSettings = {
@@ -954,6 +962,125 @@ const initiateUsdtDeposit = async () => {
   throw new Error('Confirmation timeout');
 };
 
+const handleCopySavingsRequestusdtTron = async () => {
+  if (!process.env.NEXT_PUBLIC_APP_TRON_WALLET_ADDRESS) {
+    setCopySavingsButtonTextusdtTron("No USDT Address");
+    setTimeout(() => setCopySavingsButtonTextusdtTron("Copy USDT TRON Address"), 2000);
+    return;
+  }
+
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(process.env.NEXT_PUBLIC_APP_TRON_WALLET_ADDRESS);
+      setCopySavingsButtonTextusdtTron("Copied!");
+      setTimeout(() => setCopySavingsButtonTextusdtTron("Copy USDT TRON Address"), 2000);
+    } else {
+      const textArea = document.createElement("textarea");
+      textArea.value = process.env.NEXT_PUBLIC_APP_TRON_WALLET_ADDRESS;
+      document.body.appendChild(textArea);
+      textArea.select();
+      try {
+        document.execCommand("copy");
+        setCopySavingsButtonTextusdtTron("Copied!");
+        setTimeout(() => setCopySavingsButtonTextusdtTron("Copy USDT TRON Address"), 2000);
+      } catch {
+        throw new Error("Clipboard copy failed via fallback");
+      } finally {
+        document.body.removeChild(textArea);
+      }
+    }
+  } catch (err) {
+    console.error("Clipboard error:", err);
+    setCopySavingsButtonTextusdtTron("Copy Failed");
+    setTimeout(() => setCopySavingsButtonTextusdtTron("Copy USDT TRON Address"), 2000);
+    }
+};
+
+const connectTronWallet = async () => {
+  if (window.tronWeb && window.tronWeb.ready) {
+    setTronWalletConnected(true);
+    setUsdtTronError(null);
+    console.log('TronLink connected.');
+  } else {
+    setUsdtTronError('TronLink not detected. Please install the extension and unlock your wallet.');
+  }
+};
+
+const initiateUsdtTronDeposit = async () => {
+  setUsdtTronError(null);
+  if (!window.tronWeb || !window.tronWeb.ready) {
+    setUsdtTronError('TronLink not connected. Please connect your wallet first.');
+    return;
+  }
+  console.log('Initiating USDT TRON deposit of', usdtTronSavingsAmount, 'USDT');
+  try {
+    const tronWeb = window.tronWeb;
+    const contract = await tronWeb.contract().at(process.env.NEXT_PUBLIC_TRON_USDT_CONTRACT_ADDRESS!);
+
+    //const userAddress = tronWeb.defaultAddress.base58;
+    //const balance = await contract.balanceOf(userAddress).call();
+    const amountSun = usdtTronSavingsAmount * 1e6; // USDT on TRON has 6 decimals
+
+    /*
+    if (balance.toNumber() < amountSun) {
+      throw new Error(`Insufficient USDT balance. You have ${balance.toNumber() / 1e6} USDT available.`);
+    }
+    */
+
+    const tx = await contract.transfer(
+      process.env.NEXT_PUBLIC_APP_TRON_WALLET_ADDRESS!,
+      amountSun
+    ).send({
+      feeLimit: 100000000, // 100 TRX fee limit
+    });
+
+    console.log('USDT TRON deposit transaction sent. Hash:', tx);
+    setUsdtTronTxHash(tx);
+    setUsdtTronPaymentStatus('pending');
+
+    await fetch('/api/recordUsdtTronDeposit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ txHash: tx, amount: usdtTronSavingsAmount, userId: user?.uid }),
+        });
+
+    setUsdtTronPaymentStatus('confirmed');
+    
+    /*
+    // Poll for confirmation
+    let receipt = null;
+    while (receipt === null) {
+      receipt = await tronWeb.trx.getTransactionInfo(tx);
+      if (receipt && receipt.receipt.result === 'SUCCESS') {
+        setUsdtTronPaymentStatus('confirmed');
+        console.log('USDT TRON deposit confirmed.');
+        await fetch('/api/recordUsdtTronDeposit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ txHash: tx, amount: usdtTronSavingsAmount, userId: user?.uid }),
+        });
+      } else if (receipt && receipt.receipt.result === 'FAILED') {
+        throw new Error('Transaction failed on-chain');
+      }
+      await new Promise(resolve => setTimeout(resolve, 3000)); // Poll every 3s
+    }
+    */
+
+  } catch (err: unknown) {
+    const error = err as Error;
+    let message = error.message || 'Deposit failed. Check wallet balance/gas.';
+    if (message.includes('Insufficient USDT balance')) {
+      message = 'Insufficient USDT balance in your wallet on TRON. Please add funds and retry.';
+    } else if (message.includes('User rejected the request')) {
+      message = 'Transaction rejected by user.';
+    }
+    console.error('USDT TRON deposit error:', error);
+    setUsdtTronError(message);
+    setUsdtTronPaymentStatus(null);
+  }
+};
+
+
 
 
   /*
@@ -1219,6 +1346,14 @@ const initiateUsdtDeposit = async () => {
                   >
                     USDT (Polygon)
                   </button>
+                  <button
+                    onClick={() => setSavingsOption('usdtTron')}
+                    className={`px-4 py-2 rounded ${
+                      savingsOption === 'usdtTron' ? 'bg-blue-600' : 'bg-gray-600'
+                    } text-white hover:bg-blue-700 transition-colors`}
+                  >
+                    USDT (TRON)
+                  </button>
                 </div>
 
                 {savingsOption === 'bancosColombia' && (
@@ -1351,6 +1486,64 @@ const initiateUsdtDeposit = async () => {
                     {usdtError && <p className="text-red-400 mt-2">{usdtError}</p>}
                   </div>
                 )}
+
+                {savingsOption === 'usdtTron' && (
+                  <div className="mt-4">
+                    <h3 className="text-lg font-semibold mb-2 text-center">Savings (USDT on TRON)</h3>
+                    <input
+                      type="number"
+                      value={usdtTronSavingsAmount}
+                      onChange={(e) => setUsdtTronSavingsAmount(parseFloat(e.target.value) || 30)}
+                      placeholder="Amount (USDT)"
+                      className="w-full p-2 bg-gray-600 rounded text-white mb-2"
+                    />
+                    <div className="text-center mt-4">
+                      <p className="text-sm text-gray-300">Send manually to: {process.env.NEXT_PUBLIC_APP_TRON_WALLET_ADDRESS}</p>
+                      <button
+                          onClick={handleCopySavingsRequestusdtTron}
+                          className="mt-2 px-4 py-2 bg-gray-600 rounded text-white hover:bg-gray-700 transition-colors"
+                        >
+                          {copySavingsButtonTextusdtTron}
+                        </button>
+                        <div className="text-center mt-4">
+                      <p className="text-sm text-gray-300">Or scan the QR on your wallet app</p>
+                    </div>
+                      <QRCodeCanvas value={`${process.env.NEXT_PUBLIC_APP_TRON_WALLET_ADDRESS}?amount=${usdtTronSavingsAmount}`} size={128} className="mx-auto" />
+                    </div>
+
+                    <div className="text-center mt-4">
+                      <p className="text-sm text-gray-300">Minimo 30 USDT</p>
+                    </div>
+
+                    <div className="text-center mt-1">
+                      <p className="text-sm text-gray-300">Or connect your wallet to deposit USDT</p>
+                    </div>
+                    
+                    {!tronWalletConnected ? (
+                      <button onClick={connectTronWallet} className="w-full px-4 py-2 bg-blue-600 rounded mb-4">
+                        Connect TronLink
+                      </button>
+                    ) : (
+                      <button
+                        onClick={initiateUsdtTronDeposit}
+                        disabled={usdtTronSavingsAmount <= 0 || usdtTronPaymentStatus === 'pending'}
+                        className="w-full px-4 py-2 bg-blue-600 rounded mb-4 disabled:bg-gray-500"
+                        title={usdtTronSavingsAmount <= 0 ? 'Enter an amount greater than 0' : usdtTronPaymentStatus === 'pending' ? 'Transaction pending' : ''}
+                      >
+                        Deposit USDT
+                      </button>
+                    )}
+                    {usdtTronTxHash && (
+                      <p className="text-sm text-gray-300 break-all">
+                        Tx Hash: {usdtTronTxHash} (<a href={`https://tronscan.org/#/transaction/${usdtTronTxHash}`} target="_blank" rel="noopener noreferrer" className="text-blue-400">View on TronScan</a>)
+                      </p>
+                    )}
+                    {usdtTronPaymentStatus === 'pending' && <p className="text-yellow-400 mt-2">Transaction pending...</p>}
+                    {usdtTronPaymentStatus === 'confirmed' && <p className="text-green-400 mt-2">Deposit confirmed! Balance updating soon.</p>}
+                    {usdtTronError && <p className="text-red-400 mt-2">{usdtTronError}</p>}
+                  </div>
+                )}
+
 
               </div>
             )}
