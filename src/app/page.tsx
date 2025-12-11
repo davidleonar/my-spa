@@ -161,6 +161,7 @@ export default function Home() {
   const [transferAmount, setTransferAmount] = useState(0);
   
   const [tapdError, setTapdError] = useState<string | null>(null);
+  const [tapdMessage, setTapdMessage] = useState<string | null>(null);
 
   // Para el rendering automatico
   useEffect(() => {
@@ -1150,7 +1151,9 @@ const handleMint = async () => {
 };
 // Similar for handleBurn, handleTransfer (use /burnAsset, /transferAsset)
 
-
+/* ------------------------------------------------------------------ */
+/*  GET – Funcion para obtener info de TAPD            */
+/* ------------------------------------------------------------------ */
 const handleGet = async () => {
   try {
     const auth = getAuth();
@@ -1176,7 +1179,8 @@ const handleGet = async () => {
       console.log("TAPD response:", data);
 
       setTapdError(null);
-      alert('Get successful');
+      setTapdMessage('Get successful');
+      //alert('Get successful');
 
       setBurnAsset('ok');
       setBurnAmount(1);
@@ -1944,7 +1948,7 @@ const handleGet = async () => {
                           )}
                           <button onClick={handleGet} className="w-full mt-2 bg-orange-600 hover:bg-orange-700 py-2 rounded">Tapd Getinfo</button>
                           {tapdError && <p className="text-red-400 mt-2">{tapdError}</p>}
-                          
+                          {tapdMessage && <p className="text-green-400 mt-2">{tapdMessage}</p>}
 
                         </div>
               )}
