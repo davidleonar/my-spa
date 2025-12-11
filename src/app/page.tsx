@@ -142,6 +142,26 @@ export default function Home() {
   const [usdtTronError, setUsdtTronError] = useState<string | null>(null);
   const [copySavingsButtonTextusdtTron, setCopySavingsButtonTextusdtTron] = useState<string>("Copy USDT TRON Address");
 
+  // States para Taproot Assets
+  const [showAdminAssets, setShowAdminAssets] = useState(true);
+  //const [edgeBalance, setEdgeBalance] = useState<number | null>(null);
+  //const [assetsBalances, setAssetsBalances] = useState<{ usdt: number; cop: number }>({ usdt: 0, cop: 0 });
+  //const [mintBurnHistory, setMintBurnHistory] = useState<MovementRow[]>([]);
+
+  const [mintAsset, setMintAsset] = useState('');
+  const [mintAmount, setMintAmount] = useState(0);
+  const [mintUserId, setMintUserId] = useState('');
+  
+  const [burnAsset, setBurnAsset] = useState('');
+  const [burnAmount, setBurnAmount] = useState(0);
+  const [burnUserId, setBurnUserId] = useState('');
+  const [transferAsset, setTransferAsset] = useState('');
+  const [transferFromUserId, setTransferFromUserId] = useState('');
+  const [transferToUserId, setTransferToUserId] = useState('');
+  const [transferAmount, setTransferAmount] = useState(0);
+  
+  const [tapdError, setTapdError] = useState<string | null>(null);
+
   // Para el rendering automatico
   useEffect(() => {
     setIsClient(true); // Set to true after mounting
@@ -183,7 +203,7 @@ export default function Home() {
         });
     }
   }
-  connectTronWallet();
+  //connectTronWallet();
   }, []);
 
   const actionCodeSettings = {
@@ -1080,7 +1100,99 @@ const initiateUsdtTronDeposit = async () => {
   }
 };
 
+const handleMint = async () => {
+  if (!mintAsset || mintAmount <= 0 || !mintUserId) return alert('Invalid input');
+  try {
+    const auth = getAuth();
+    const user = auth.currentUser;
 
+    if (!user) throw new Error("User not authenticated");
+
+      // 1. Get the Firebase ID token from the logged-in user.
+    const token = await user.getIdToken();
+
+    const body = {
+        asset: mintAsset,
+        amount: mintAmount,
+        userId: mintUserId,
+        memo: 'Donation from App',
+        expiry: '300',
+        private: false,
+        add_index: 1,
+      };
+      console.log('Sending donation request:', body);
+
+      const res = await fetch('/api/tapdProxy/v1/taproot-assets/assets', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({body}),
+      });
+    
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('Proxy error:', errorText);
+        throw new Error(`Server error: ${res.status}`);
+      }
+  
+      const data = await res.json();
+      console.log("TAPD response:", data);
+
+      setTapdError(null);
+      alert('Mint successful');
+
+    }
+    catch (err: unknown) {
+    const error = err as Error;
+    const message = error.message || 'Mint failed. Please try again.';
+    setTapdError(message);
+    console.error('Mint error:', error);
+  }
+};
+// Similar for handleBurn, handleTransfer (use /burnAsset, /transferAsset)
+
+
+const handleGet = async () => {
+  try {
+    const auth = getAuth();
+    const user = auth.currentUser;
+
+    if (!user) throw new Error("User not authenticated");
+
+      // 1. Get the Firebase ID token from the logged-in user.
+    const token = await user.getIdToken();
+
+      const res = await fetch('/api/tapdProxy/v1/getinfo', {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('Proxy error:', errorText);
+        throw new Error(`Server error: ${res.status}`);
+      }
+  
+      const data = await res.json();
+      console.log("TAPD response:", data);
+
+      setTapdError(null);
+      alert('Get successful');
+
+      setBurnAsset('ok');
+      setBurnAmount(1);
+      setBurnUserId('ok');
+      setTransferAsset('ok');
+      setTransferAmount(1);
+      setTransferToUserId('ok');
+
+    }
+    catch (err: unknown) {
+    const error = err as Error;
+    const message = error.message || 'Get failed. Please try again.';
+    setTapdError(message);
+    console.error('Get error:', error);
+  }
+};
 
 
   /*
@@ -1778,6 +1890,68 @@ const initiateUsdtTronDeposit = async () => {
             </>
           )}
         </div>
+        
+        {user?.uid === '5XgksHrgmyeGqqKFYGVjQVM0KGl1' && (
+          <div className="mt-6">
+            <h2 className="text-lg font-bold mb-4 text-center cursor-pointer" onClick={() => setShowAdminAssets(!showAdminAssets)}>
+              Admin Assets Management {showAdminAssets ? '▲' : '▼'}
+            </h2>
+            {showAdminAssets && (
+              <div className="bg-purple-900 p-4 rounded shadow">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Mint Form */}
+                <div className="bg-black/50 p-4 rounded">
+                  <h3 className="font-bold text-green-400">Mint Asset</h3>
+                  <select onChange={(e) => setMintAsset(e.target.value)} className="w-full p-2 bg-gray-800 rounded mt-2">
+                    <option value="">Select Asset</option>
+                    <option value="USDT">USDT</option>
+                    <option value="COP">COP</option>
+                  </select>
+                  <input type="number" placeholder="Amount" onChange={(e) => setMintAmount(parseFloat(e.target.value))} className="w-full p-2 bg-gray-800 rounded mt-2" />
+                  <input type="text" placeholder="User ID" onChange={(e) => setMintUserId(e.target.value)} className="w-full p-2 bg-gray-800 rounded mt-2" />
+                  <button onClick={handleMint} className="w-full mt-2 bg-green-600 hover:bg-green-700 py-2 rounded">Mint</button>
+                </div>
+
+                {/* Burn Form */}
+                <div className="bg-black/50 p-4 rounded">
+                  <h3 className="font-bold text-red-400">Burn Asset</h3>
+                  <select onChange={(e) => setBurnAsset(e.target.value)} className="w-full p-2 bg-gray-800 rounded mt-2">
+                    <option value="">Select Asset</option>
+                    <option value="USDT">USDT</option>
+                    <option value="COP">COP</option>
+                  </select>
+                  <input type="number" placeholder="Amount" onChange={(e) => setBurnAmount(parseFloat(e.target.value))} className="w-full p-2 bg-gray-800 rounded mt-2" />
+                  <input type="text" placeholder="User ID" onChange={(e) => setBurnUserId(e.target.value)} className="w-full p-2 bg-gray-800 rounded mt-2" />
+                  <button className="w-full mt-2 bg-red-600 hover:bg-red-700 py-2 rounded">Burn</button>
+                </div>
+
+                {/* Transfer Form */}
+                <div className="bg-black/50 p-4 rounded">
+                  <h3 className="font-bold text-blue-400">Transfer Asset</h3>
+                  <select onChange={(e) => setTransferAsset(e.target.value)} className="w-full p-2 bg-gray-800 rounded mt-2">
+                    <option value="">Select Asset</option>
+                    <option value="USDT">USDT</option>
+                    <option value="COP">COP</option>
+                  </select>
+                  <input type="number" placeholder="Amount" onChange={(e) => setTransferAmount(parseFloat(e.target.value))} className="w-full p-2 bg-gray-800 rounded mt-2" />
+                  <input type="text" placeholder="From User ID" onChange={(e) => setTransferFromUserId(e.target.value)} className="w-full p-2 bg-gray-800 rounded mt-2" />
+                  <input type="text" placeholder="To User ID" onChange={(e) => setTransferToUserId(e.target.value)} className="w-full p-2 bg-gray-800 rounded mt-2" />
+                  <button className="w-full mt-2 bg-blue-600 hover:bg-blue-700 py-2 rounded">Transfer</button>
+                </div>
+              </div>
+                            </div>
+                            
+                          )}
+                          <button onClick={handleGet} className="w-full mt-2 bg-orange-600 hover:bg-orange-700 py-2 rounded">Tapd Getinfo</button>
+                          {tapdError && <p className="text-red-400 mt-2">{tapdError}</p>}
+                          
+
+                        </div>
+              )}
+              <div className="bg-black/50 p-4 rounded">
+                  <h3 className="font-bold text-blue-400">{burnAsset}, {burnAmount}, {burnUserId}, {transferAsset}, {transferAmount}, {transferFromUserId}, {transferToUserId}</h3>
+              </div>
+            
 
         <button
           onClick={handleWhatsAppClick}
