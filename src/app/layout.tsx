@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import Head from "next/head";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -16,6 +15,28 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Rendimientos App",
   description: "Ahorra BTC de manera soberana",
+  icons: "/favicon.ico",
+  openGraph: {
+    title: 'Rendimientos App',
+    description: 'Ahorra BTC de manera soberana',
+    url: 'https://rendimientos.net/',
+    siteName: 'Rendimientos App',
+    images: [
+      {
+        url: 'https://rendimientos.net/AppIcon.appiconset/1024.png', // Absolute for crawlers
+        width: 1024,
+        height: 1024,
+      },
+    ],
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Rendimientos App',
+    description: 'Ahorra BTC de manera soberana',
+    images: ['https://rendimientos.net/AppIcon.appiconset/1024.png'],
+  },
+
 };
 
 export default function RootLayout({
@@ -24,19 +45,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html>
-      <Head>
-        <link rel="icon" href="/logo.png" />
-        <meta property="og:title" content="Rendimientos App" />
-        <meta property="og:description" content="Ahorra BTC de manera soberana" />
-        <meta property="og:image" content="/logo.png" />
-        <meta property="og:url" content="https://rendimientos-5dbb9.web.app/" />
-        <meta property="og:type" content="website" />
-        <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content="Rendimientos App" />
-        <meta name="twitter:description" content="Ahorra BTC de manera soberana" />
-        <meta name="twitter:image" content="/logo.png" />
-      </Head>
+    <html lang="en">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
