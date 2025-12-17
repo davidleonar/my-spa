@@ -162,6 +162,12 @@ export default function Home() {
   
   const [tapdError, setTapdError] = useState<string | null>(null);
   const [tapdMessage, setTapdMessage] = useState<string | null>(null);
+  const [tapdPath, setTapdPath] = useState<string>('v1/getinfo');
+
+  // States for sync
+  const [syncLoading, setSyncLoading] = useState<boolean>(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   // Para el rendering automatico
   useEffect(() => {
@@ -1164,7 +1170,7 @@ const handleGet = async () => {
       // 1. Get the Firebase ID token from the logged-in user.
     const token = await user.getIdToken();
 
-      const res = await fetch('/api/tapdProxy/v1/getinfo', {
+      const res = await fetch(`/api/tapdProxy/${tapdPath}`, {
         method: 'GET',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       });
@@ -1198,6 +1204,43 @@ const handleGet = async () => {
   }
 };
 
+//---------------------------------------------------------------- */
+// Handle loading state
+//---------------------------------------------------------------- */
+
+const handleSync = async () => {
+  if (!user) return; // Safety check, though admin section already gates this
+
+  setSyncLoading(true);
+  setSyncMessage(null);
+  setSyncError(null);
+
+  try {
+    const idToken = await user.getIdToken(); // Get Firebase ID token for auth
+    const response = await fetch('https://us-central1-rendimientos-5dbb9.cloudfunctions.net/syncSheetsToRTDB', {
+      method: 'GET', // Matches the function's onRequest (handles GET)
+      headers: {
+        'Authorization': `Bearer ${idToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'Sync failed');
+    }
+
+    const data = await response.json();
+    setSyncMessage(data.message || 'Sync completed successfully');
+    
+  } catch (err: unknown) {
+    const error = err as Error;
+    setSyncError(error.message || 'An error occurred during sync');
+    console.error('Sync error:', err);
+  } finally {
+    setSyncLoading(false);
+  }
+};
 
   /*
   if (loadingAuth) {
@@ -1294,7 +1337,7 @@ const handleGet = async () => {
                 type="text"
                 value={id}
                 onChange={(e) => setId(e.target.value)}
-                placeholder="Enter ID"
+                placeholder="Ingresa tu ID o cedula"
                 className="w-full p-2 bg-gray-600 rounded text-white border border-gray-500 focus:outline-none focus:border-blue-500"
               />
               <button
@@ -1946,9 +1989,20 @@ const handleGet = async () => {
                             </div>
                             
                           )}
-                          <button onClick={handleGet} className="w-full mt-2 bg-orange-600 hover:bg-orange-700 py-2 rounded">Tapd Getinfo</button>
+                          <input type="text" placeholder="Tapd Path" value={tapdPath} onChange={(e) => setTapdPath(e.target.value)} className="w-full p-2 bg-gray-800 rounded mt-2" />
+                          <button onClick={handleGet} className="w-full mt-2 bg-orange-600 hover:bg-orange-700 py-2 rounded">Call Tapd API</button>
                           {tapdError && <p className="text-red-400 mt-2">{tapdError}</p>}
                           {tapdMessage && <p className="text-green-400 mt-2">{tapdMessage}</p>}
+
+                          <button 
+                            onClick={handleSync} 
+                            disabled={syncLoading} 
+                            className="w-full mt-4 bg-purple-600 hover:bg-purple-700 py-2 rounded disabled:bg-gray-500"
+                          >
+                            {syncLoading ? 'Syncing...' : 'Sync with RTDB'}
+                          </button>
+                          {syncError && <p className="text-red-400 mt-2">{syncError}</p>}
+                          {syncMessage && <p className="text-green-400 mt-2">{syncMessage}</p>}
 
                         </div>
               )}

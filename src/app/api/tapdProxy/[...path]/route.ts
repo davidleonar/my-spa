@@ -87,7 +87,7 @@ export async function GET(req: NextRequest) {
   try {
     const firebaseResp = await fetch(proxyUrl, {
       method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'authorization': req.headers.get('Authorization') || '' },
     });
 
     const clone = firebaseResp.clone();
