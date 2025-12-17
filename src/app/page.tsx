@@ -1525,9 +1525,9 @@ const handleSync = async () => {
                 {savingsOption === 'bancosEuropa' && (
                   <div className="mt-4 text-center p-4 bg-gray-800 rounded text-xs">
                     <p>My IBAN account details:</p>
-                    <p>Recipient name: Bridge Building</p>
-                    <p>IBAN: IE71 MODR 9903 5507 4589 16</p>
-                    <p>Bank name and address: Modulr Finance B.V., 2 Grand Canal Square Floor 6, Dublin, D02, Ireland</p>
+                    <p>Recipient name: Bridge Building Sp. Z.o.o.</p>
+                    <p>IBAN: LU77 4080 0000 4178 5760</p>
+                    <p>Bank name and address: Banking Circle S.A, 2 Boulevard de la Foire Luxembourg City L-1528 Luxembourg</p>
                   </div>
                 )}
 
