@@ -618,6 +618,7 @@ const handleSignOut = () => {
                 amount: Number(invoice.amt_paid_sat),
                 settledAt: serverTimestamp(),
                 r_hash: savingsPaymentHash,
+                network: 'BTC Lightning',
               };
               await set(ref(database, `userSavings/${user.uid}/${savingsPaymentHash}`), savingsData);
             }
@@ -657,7 +658,7 @@ const handleSignOut = () => {
       const value_msat = savingsAmount * 1000;
       const body = {
         value_msat: value_msat,
-        memo: `Savings from${user ? ` user ${user.displayName}` : ''}`,
+        memo: `Savings from${user ? ` ${user.displayName}` : ''}`,
         expiry: '300',
         private: false,
         add_index: 1,
@@ -1277,7 +1278,7 @@ const handleSync = async () => {
             <button onClick={() => handleOAuthLogin(new GoogleAuthProvider())} className="w-full px-4 py-2 bg-red-500 rounded text-white mb-2">
               Iniciar con Google
             </button>
-            <button onClick={() => handleOAuthLogin(new TwitterAuthProvider())} className="w-full px-4 py-2 bg-sky-500 rounded text-white mb-2">
+            <button onClick={() => handleOAuthLogin(new TwitterAuthProvider())} className="w-full px-4 py-2 bg-gray-900 rounded text-white mb-2">
               Iniciar con X
             </button>
             <a 
@@ -2003,12 +2004,11 @@ const handleSync = async () => {
                           </button>
                           {syncError && <p className="text-red-400 mt-2">{syncError}</p>}
                           {syncMessage && <p className="text-green-400 mt-2">{syncMessage}</p>}
+                          <h3 className="font-bold text-blue-400">{burnAsset}, {burnAmount}, {burnUserId}, {transferAsset}, {transferAmount}, {transferFromUserId}, {transferToUserId}</h3>
 
                         </div>
               )}
-              <div className="bg-black/50 p-4 rounded">
-                  <h3 className="font-bold text-blue-400">{burnAsset}, {burnAmount}, {burnUserId}, {transferAsset}, {transferAmount}, {transferFromUserId}, {transferToUserId}</h3>
-              </div>
+              
             
 
         <button
