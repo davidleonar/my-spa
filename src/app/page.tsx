@@ -855,29 +855,62 @@ const handleSignOut = () => {
     }
 };
 
+/* ------------------------------------------------------------------ */
+  /*  Para manejar el deposito USDT Polygon                                                */
+  /* ------------------------------------------------------------------ */
 const handleUsdtDeposit = async () => {
+  if (!provider || !account || !user?.uid) {
+    setUsdtError('Wallet not connected or user not authenticated');
+    return;
+  }
+
   setUsdtError(null);
-  if (!provider || !account) return;
-
-  const signer = await provider.getSigner();
-  const usdtContract = new ethers.Contract(
-    process.env.NEXT_PUBLIC_USDT_CONTRACT_ADDRESS!,
-    USDT_ABI,
-    signer
-  );
-
-  const amount = ethers.parseUnits(usdtSavingsAmount.toString(), 6); // USDT has 6 decimals
-
-  const tx = await usdtContract.transfer(
-    process.env.NEXT_PUBLIC_POLYGON_APP_WALLET_ADDRESS, // your app wallet
-    amount
-  );
-
   setUsdtPaymentStatus('pending');
-  setUsdtTxHash(tx.hash);
 
-  await tx.wait(1); // wait 1 confirmation
-  setUsdtPaymentStatus('confirmed');
+  try {
+    const signer = await provider.getSigner();
+    const usdtContract = new ethers.Contract(
+      process.env.NEXT_PUBLIC_USDT_CONTRACT_ADDRESS!,
+      USDT_ABI,
+      signer
+    );
+
+    const amount = ethers.parseUnits(usdtSavingsAmount.toString(), 6); // USDT: 6 decimals
+
+    const tx = await usdtContract.transfer(
+      process.env.NEXT_PUBLIC_POLYGON_APP_WALLET_ADDRESS!, // Your app wallet
+      amount
+    );
+
+    setUsdtTxHash(tx.hash);
+
+    // Wait for 1 confirmation (Polygon: fast, ~15s/block)
+    const receipt = await tx.wait(1);
+    setUsdtPaymentStatus('confirmed');
+
+    // Register in RTDB (after confirmation)
+    const savingsRef = ref(database, `userSavings/${user.uid}/${tx.hash}`);
+    await set(savingsRef, {
+      userId: user.uid, // Required per rules.json for validation
+      txHash: tx.hash,
+      amount: usdtSavingsAmount, // Raw amount (number)
+      chain: 'polygon',
+      asset: 'usdt',
+      timestamp: serverTimestamp(), // Server-side timestamp for accuracy/security
+      status: 'confirmed', // Optional: Track state
+      receipt: { // Optional: Store minimal receipt info (avoid full for size)
+        blockNumber: receipt.blockNumber,
+        gasUsed: receipt.gasUsed.toString(),
+      },
+    });
+
+    console.log('Deposit registered in RTDB');
+    // Optional: Update UI or fetch balances
+  } catch (err: unknown) {
+    setUsdtError((err as Error).message || 'Deposit failed');
+    setUsdtPaymentStatus(null);
+    console.error(err);
+  }
 };
 
 const handleCopySavingsRequestusdtTron = async () => {
