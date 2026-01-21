@@ -85,6 +85,7 @@ export default function Home() {
 
   // MetaMask hook
   const { provider, account, connect, disconnect, isConnecting, error: metamaskError } = useMetaMask();
+  const [registrationStatus, setRegistrationStatus] = useState<'pending' | 'success' | null>(null);
 
   // States for donations
   const [donationAmount, setDonationAmount] = useState<number>(1000); // Default 1000 sats
@@ -145,7 +146,7 @@ export default function Home() {
   const [copySavingsButtonTextusdtTron, setCopySavingsButtonTextusdtTron] = useState<string>("Copy USDT TRON Address");
 
   // States para Taproot Assets
-  const [showAdminAssets, setShowAdminAssets] = useState(true);
+  const [showAdminAssets, setShowAdminAssets] = useState(false);
   //const [edgeBalance, setEdgeBalance] = useState<number | null>(null);
   //const [assetsBalances, setAssetsBalances] = useState<{ usdt: number; cop: number }>({ usdt: 0, cop: 0 });
   //const [mintBurnHistory, setMintBurnHistory] = useState<MovementRow[]>([]);
@@ -897,7 +898,7 @@ const handleUsdtDeposit = async () => {
       chain: 'polygon',
       asset: 'usdt',
       timestamp: serverTimestamp(), // Server-side timestamp for accuracy/security
-      status: 'confirmed', // Optional: Track state
+      status: 'Confirmed', // Optional: Track state
       receipt: { // Optional: Store minimal receipt info (avoid full for size)
         blockNumber: receipt.blockNumber,
         gasUsed: receipt.gasUsed.toString(),
@@ -906,6 +907,8 @@ const handleUsdtDeposit = async () => {
 
     console.log('Deposit registered in RTDB');
     // Optional: Update UI or fetch balances
+    setRegistrationStatus('success');
+
   } catch (err: unknown) {
     setUsdtError((err as Error).message || 'Deposit failed');
     setUsdtPaymentStatus(null);
@@ -1571,7 +1574,7 @@ const handleSync = async () => {
                     {account && usdtSavingsAmount > 0 && (
                       <button
                         onClick={handleUsdtDeposit}
-                        disabled={usdtPaymentStatus === 'pending'}
+                        disabled={usdtPaymentStatus === 'pending' || !user?.uid}
                         className="w-full mt-3 px-4 py-2 bg-green-600 rounded text-white"
                       >
                         {usdtPaymentStatus === 'pending' ? 'Sending…' : 'Send USDT → Savings'}
@@ -1585,6 +1588,7 @@ const handleSync = async () => {
                     )}
                     {usdtPaymentStatus === 'pending' && <p className="text-yellow-400 mt-2">Transaction pending...</p>}
                     {usdtPaymentStatus === 'confirmed' && <p className="text-green-400 mt-2">Deposit confirmed! Balance updating soon.</p>}
+                    {registrationStatus === 'success' && <p className="text-green-400 mt-2">Deposit registered!</p>}
                     {usdtError && <p className="text-red-400 mt-2">{usdtError}</p>}
                   </div>
                 )}
