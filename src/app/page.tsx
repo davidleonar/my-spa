@@ -857,8 +857,8 @@ const handleSignOut = () => {
 };
 
 /* ------------------------------------------------------------------ */
-  /*  Para manejar el deposito USDT Polygon                                                */
-  /* ------------------------------------------------------------------ */
+/*  Para manejar el deposito USDT Polygon                             */
+/* ------------------------------------------------------------------ */
 const handleUsdtDeposit = async () => {
   if (!provider || !account || !user?.uid) {
     setUsdtError('Wallet not connected or user not authenticated');
@@ -960,6 +960,9 @@ const connectTronWallet = async () => {
   }
 };
 
+/* ------------------------------------------------------------------ */
+/*  Para manejar el deposito USDT TRON                                */
+/* ------------------------------------------------------------------ */
 const initiateUsdtTronDeposit = async () => {
   setUsdtTronError(null);
   if (!window.tronWeb || !window.tronWeb.ready) {
@@ -999,26 +1002,6 @@ const initiateUsdtTronDeposit = async () => {
         });
 
     setUsdtTronPaymentStatus('confirmed');
-    
-    /*
-    // Poll for confirmation
-    let receipt = null;
-    while (receipt === null) {
-      receipt = await tronWeb.trx.getTransactionInfo(tx);
-      if (receipt && receipt.receipt.result === 'SUCCESS') {
-        setUsdtTronPaymentStatus('confirmed');
-        console.log('USDT TRON deposit confirmed.');
-        await fetch('/api/recordUsdtTronDeposit', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ txHash: tx, amount: usdtTronSavingsAmount, userId: user?.uid }),
-        });
-      } else if (receipt && receipt.receipt.result === 'FAILED') {
-        throw new Error('Transaction failed on-chain');
-      }
-      await new Promise(resolve => setTimeout(resolve, 3000)); // Poll every 3s
-    }
-    */
 
   } catch (err: unknown) {
     const error = err as Error;
