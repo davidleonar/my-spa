@@ -1021,6 +1021,11 @@ const handleUsdtTronDeposit = async () => {
 };
 
 /* ------------------------------------------------------------------ */
+/*  BTC Withdrawals                                                   */
+/* ------------------------------------------------------------------ */
+
+
+/* ------------------------------------------------------------------ */
 /*  POST – Funciones para manejar TAPD (Mint, Burn, Transfer)          */
 /* ------------------------------------------------------------------ */
 
@@ -1868,6 +1873,7 @@ const resetUsdtTronDeposit = () => {
                      <p className="text-xs mt-2 text-gray-400">1% comision de retiro. 1 a 3 dias hábiles</p>
                   </div>
                 )}
+                
               </div>
             )}
           </div>
