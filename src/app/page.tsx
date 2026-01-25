@@ -1530,6 +1530,7 @@ const resetUsdtTronDeposit = () => {
                 )}
 
                 {savingsOption === 'usdtPolygon' && (
+                  
                   <div className="mt-4">
                     <h3 className="text-lg font-semibold mb-2 text-center">Savings (USDT on Polygon)</h3>
                     <input
@@ -1550,7 +1551,27 @@ const resetUsdtTronDeposit = () => {
                         <div className="text-center mt-4">
                       <p className="text-sm text-gray-300">Or scan the QR on your wallet app</p>
                     </div>
-                      <QRCodeCanvas value={`ethereum:${process.env.NEXT_PUBLIC_APP_WALLET_ADDRESS}?value=${usdtSavingsAmount}&chain=137&token=${process.env.NEXT_PUBLIC_USDT_CONTRACT_ADDRESS}`} size={128} className="mx-auto" />
+                    
+                      {/* INSERT HERE: Computed EIP-681 URI for MetaMask compatibility */}
+                      {(() => {
+                        const appWallet = process.env.NEXT_PUBLIC_APP_WALLET_ADDRESS!;
+                        const usdtContract = process.env.NEXT_PUBLIC_USDT_CONTRACT_ADDRESS!;
+
+                        let qrValue = appWallet; // Fallback to plain address
+
+                        if (usdtSavingsAmount > 0) {
+                          try {
+                            const amountWei = ethers.parseUnits(usdtSavingsAmount.toString(), 6).toString(); // Scale to 6 decimals (USDT)
+                            qrValue = `ethereum:${usdtContract}@137/transfer?address=${appWallet}&uint256=${amountWei}`;
+                          } catch (err) {
+                            console.error('QR amount parse error:', err);
+                            qrValue = appWallet; // Fallback on error
+                          }
+                        }
+
+                        return <QRCodeCanvas value={qrValue} size={128} className="mx-auto" />;
+                      })()}
+
                     </div>
 
                     <div className="text-center mt-4">
