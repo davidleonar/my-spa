@@ -1116,7 +1116,6 @@ const resetWithdrawal = () => {
   setWithdrawalPaymentStatus(null);
   setShowScanner(false); // Ensure revoked before re-show
   setScannerError(null);
-  setTimeout(() => setShowScanner(true), 0); // Re-show if needed, but delayed for full unmount
 };
 
 
@@ -1962,12 +1961,9 @@ const resetUsdtTronDeposit = () => {
                       <QrScanner
                         onScanSuccess={(text) => {
                           handleBolt11(text);
-                          setShowScanner(false); // Hide to revoke access immediately
+                          setShowScanner(false);
                         }}
-                        onScanError={(err) => {
-                          setScannerError(err);
-                          setShowScanner(false); // Revoke on error too
-                        }}
+                        onScanError={(err) => setScannerError(err)}
                       />
                     )}
                     <button onClick={handlePasteFromClipboard} className="text-xs underline text-gray-400 w-full px-4 py-2 rounded text-white">

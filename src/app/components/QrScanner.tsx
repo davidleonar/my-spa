@@ -14,7 +14,6 @@ const QrScanner = ({
 
   useEffect(() => {
 
-    let scannerInstance: Html5Qrcode | null = null; // Local ref for cleanup
     const startScanner = async () => {
       try {
         scannerRef.current = new Html5Qrcode("reader");
@@ -36,12 +35,7 @@ const QrScanner = ({
       }
     };
     startScanner();
-    return () => { 
-      if (scannerInstance) {
-      scannerInstance.stop().catch(err => console.error('Scanner stop error:', err)); // Explicit revoke
-      scannerInstance = null; // Clear ref
-    }
-     };
+    return () => { scannerRef.current?.stop().catch(console.error); };
   }, [onScanSuccess, onScanError]);
 
   return (
