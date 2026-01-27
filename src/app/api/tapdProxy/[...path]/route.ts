@@ -1,6 +1,12 @@
 // src/app/api/tapdProxy/[...path]/route.ts
 import { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
+import { getAuth } from 'firebase-admin/auth';
+import { initializeApp } from 'firebase-admin/app';
+import { RateLimiterMemory } from 'rate-limiter-flexible'; // npm install (free lib)
+
+const app = initializeApp();
+const limiter = new RateLimiterMemory({ points: 10, duration: 60 }); // 10/min per IP
 
 interface TapdRequest {
   // Generic interface; adjust based on specific endpoints if needed, but keep flexible for proxying
@@ -11,6 +17,28 @@ interface TapdRequest {
 /*  POST – e.g., mint asset, burn asset, send asset, etc.            */
 /* ------------------------------------------------------------------ */
 export async function POST(req: NextRequest) {
+
+  // Rate limit
+  try {
+    await limiter.consume(req.headers.get('x-forwarded-for') || 'anonymous');
+  } catch {
+    return new NextResponse(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429 });
+  }
+
+  // Authenticate request
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    return new NextResponse(JSON.stringify({ error: 'Unauthorized: No token' }), { status: 401 });
+  }
+
+  const idToken = authHeader.split('Bearer ')[1];
+  try {
+    await getAuth(app).verifyIdToken(idToken);
+  } catch {
+    return new NextResponse(JSON.stringify({ error: 'Unauthorized: Invalid token' }), { status: 401 });
+  }
+  // Start proxing request
+
   const { pathname, search } = new URL(req.url);
   const tapdPath = pathname.replace(/^\/api\/tapdProxy/, '') + search;
 
@@ -77,6 +105,28 @@ export async function POST(req: NextRequest) {
 /*  GET – e.g., list assets, balances, history, etc.                 */
 /* ------------------------------------------------------------------ */
 export async function GET(req: NextRequest) {
+
+  // Rate limit
+  try {
+    await limiter.consume(req.headers.get('x-forwarded-for') || 'anonymous');
+  } catch {
+    return new NextResponse(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429 });
+  }
+
+  // Authenticate request
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    return new NextResponse(JSON.stringify({ error: 'Unauthorized: No token' }), { status: 401 });
+  }
+
+  const idToken = authHeader.split('Bearer ')[1];
+  try {
+    await getAuth(app).verifyIdToken(idToken);
+  } catch {
+    return new NextResponse(JSON.stringify({ error: 'Unauthorized: Invalid token' }), { status: 401 });
+  }
+  // Start proxing request
+
   const { pathname, search } = new URL(req.url);
   const tapdPath = pathname.replace(/^\/api\/tapdProxy/, '') + search;
 
@@ -128,6 +178,27 @@ export async function GET(req: NextRequest) {
 /*  DELETE – e.g., delete universe root, federation server           */
 /* ------------------------------------------------------------------ */
 export async function DELETE(req: NextRequest) {
+
+  // Rate limit
+  try {
+    await limiter.consume(req.headers.get('x-forwarded-for') || 'anonymous');
+  } catch {
+    return new NextResponse(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429 });
+  }
+
+  // Authenticate request
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    return new NextResponse(JSON.stringify({ error: 'Unauthorized: No token' }), { status: 401 });
+  }
+
+  const idToken = authHeader.split('Bearer ')[1];
+  try {
+    await getAuth(app).verifyIdToken(idToken);
+  } catch {
+    return new NextResponse(JSON.stringify({ error: 'Unauthorized: Invalid token' }), { status: 401 });
+  }
+
   const { pathname, search } = new URL(req.url);
   const tapdPath = pathname.replace(/^\/api\/tapdProxy/, '') + search;
 

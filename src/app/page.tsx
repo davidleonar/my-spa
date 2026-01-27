@@ -27,6 +27,8 @@ import Image from 'next/image';
 import { ethers } from 'ethers';
 import { useMetaMask } from '@/app/lib/useMetaMask';
 import { useTronWallet } from '@/app/lib/useTronWallet';
+import  QrScanner  from './components/QrScanner';
+import * as bolt11Lib from 'bolt11'; // Rename to avoid conflicts
 
 export const dynamic = 'force-dynamic';
 
@@ -115,6 +117,13 @@ export default function Home() {
   // States for withdrawals
   const [showWithdrawals, setShowWithdrawals] = useState<boolean>(false);
   const [withdrawalOption, setWithdrawalOption] = useState<'bancosColombia' | 'bancosInternacionales' | 'btcLightning' | 'usdtWallet' | null>(null);
+
+  //States for BTC withdrawals
+  const [withdrawalBolt11, setWithdrawalBolt11] = useState<string | null>(null);
+  const [withdrawalQuote, setWithdrawalQuote] = useState<{ amountSats: number; baseFee: number; partnerFee: number; totalSats: number } | null>(null);
+  const [withdrawalPaymentStatus, setWithdrawalPaymentStatus] = useState<'pending' | 'success' | 'failure' | null>(null);
+  const [showScanner, setShowScanner] = useState<boolean>(false);
+  const [scannerError, setScannerError] = useState<string | null>(null);
 
   // States for withdrawal form
   const [withdrawalName, setWithdrawalName] = useState<string>('');
@@ -1025,6 +1034,92 @@ const handleUsdtTronDeposit = async () => {
 /* ------------------------------------------------------------------ */
 
 
+const handleBolt11 = async (raw: string) => {
+  const bolt11Str = raw.startsWith('lightning:') ? raw.slice(10) : raw;
+
+  /*if (!bolt11Str.match(/^ln(bc|tb|tc|regtest)[1-9a-zA-HJ-NP-Z]+$/i)) { // Basic bolt11 regex (Lightning spec)
+  throw new Error('Invalid Lightning invoice format');
+  }*/
+  // Proceed to decode
+
+  try {
+    const decoded = bolt11Lib.decode(bolt11Str);
+    const amountSats = decoded.satoshis || 0;
+    if (!amountSats) throw new Error('No amount in invoice');
+
+    // Fetch partner fee via REST (LND proxy)
+    const feeRes = await fetch('/api/lndProxy/v1/fees'); // Or with ?amount=amountSats
+    const feeData = await feeRes.json();
+    const partnerFee = feeData?.max_fee_per_msat * amountSats / 1000 || amountSats * 0.01; // Fallback 1%
+
+    const baseFeeRate = parseFloat(process.env.NEXT_PUBLIC_BASE_FEE_RATE || '0.005'); // Fallback if undefined
+    const baseFee = Math.ceil(amountSats * baseFeeRate);
+    const totalSats = amountSats + baseFee + partnerFee;
+
+    setWithdrawalBolt11(bolt11Str);
+    setWithdrawalQuote({ amountSats, baseFee, partnerFee, totalSats });
+    setScannerError(null);
+  } catch (err) {
+    setScannerError((err as Error).message);
+  }
+};
+
+const handlePasteFromClipboard = async () => {
+  if (!navigator.clipboard) {
+    setScannerError('Clipboard not supported in this browser');
+    return;
+  }
+  try {
+    const text = await navigator.clipboard.readText();
+    handleBolt11(text);
+  } catch (err) {
+    setScannerError('Clipboard access denied—check browser permissions');
+    console.error('Clipboard error:', err); // Log without exposing details
+  }
+};
+
+const handleConfirmPayment = async () => {
+  setWithdrawalPaymentStatus('pending');
+  try {
+    const payRes = await fetch('/api/lndProxy/v1/channels/transactions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payment_request: withdrawalBolt11 }),
+    });
+    if (!payRes.ok) throw new Error('Payment failed');
+
+    const decoded = bolt11Lib.decode(withdrawalBolt11!);
+    const hexHash = decoded.tagsObject.payment_hash;
+    if (!hexHash) {
+      throw new Error('Invalid invoice: Missing payment hash'); // Fail early with user-friendly error
+      }
+    const base64Hash = Buffer.from(hexHash, 'hex').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); // URL-safe
+
+    console.log('Payment sent, payment_hash:', hexHash);
+    console.log('Base64 payment_hash for lookup:', base64Hash);
+      
+    if (payRes.ok) { // SETTLED (Lightning Docs)
+      setWithdrawalPaymentStatus('success');
+      clearInterval(5);
+    } 
+    
+    setTimeout(() => clearInterval(5), 60000); // Timeout
+  } catch (err) {
+    setWithdrawalPaymentStatus('failure');
+    console.error('Payment error:', err);
+  }
+};
+
+const resetWithdrawal = () => {
+  setWithdrawalBolt11(null);
+  setWithdrawalQuote(null);
+  setWithdrawalPaymentStatus(null);
+  setShowScanner(false); // Ensure revoked before re-show
+  setScannerError(null);
+  setTimeout(() => setShowScanner(true), 0); // Re-show if needed, but delayed for full unmount
+};
+
+
 /* ------------------------------------------------------------------ */
 /*  POST – Funciones para manejar TAPD (Mint, Burn, Transfer)          */
 /* ------------------------------------------------------------------ */
@@ -1414,6 +1509,13 @@ const resetUsdtTronDeposit = () => {
                   >
                     Bancos Colombia
                   </button>
+                  {savingsOption === 'bancosColombia' && (
+                  <div className="mt-4 text-center p-4 bg-gray-800 rounded">
+                    <p className="text-lg">@3014375496</p>
+                    <p className="text-xs mt-2">Usa esta llave para realizar transferencias desde cualquier banco en Colombia. La cantidad no debe ser superior a 1.000.000 Pesos, una vez realizada la transferencia, enviar el comprobante haciendo click en &apos;Contacto&apos;. si requieres cantidades mayores, hacer click primero en &apos;Contacto&apos;</p>
+                  </div>
+                  )}
+
                   <button
                     onClick={() => setSavingsOption('btcLightning')}
                     className={`px-4 py-2 rounded ${
@@ -1422,69 +1524,7 @@ const resetUsdtTronDeposit = () => {
                   >
                     BTC Lightning
                   </button>
-                  <button
-                    onClick={() => setSavingsOption('bancosEuropa')}
-                    className={`px-4 py-2 rounded ${
-                      savingsOption === 'bancosEuropa' ? 'bg-blue-600' : 'bg-gray-600'
-                    } text-white hover:bg-blue-700 transition-colors`}
-                  >
-                    Bancos Europa
-                  </button>
-                  <button
-                    onClick={() => setSavingsOption('bancosUSA')}
-                    className={`px-4 py-2 rounded ${
-                      savingsOption === 'bancosUSA' ? 'bg-blue-600' : 'bg-gray-600'
-                    } text-white hover:bg-blue-700 transition-colors`}
-                  >
-                    Bancos USA
-                  </button>
-                  <button
-                    onClick={() => setSavingsOption('usdtPolygon')}
-                    className={`px-4 py-2 rounded ${
-                      savingsOption === 'usdtPolygon' ? 'bg-blue-600' : 'bg-gray-600'
-                    } text-white hover:bg-blue-700 transition-colors`}
-                  >
-                    USDT (Polygon)
-                  </button>
-                  <button
-                    onClick={() => setSavingsOption('usdtTron')}
-                    className={`px-4 py-2 rounded ${
-                      savingsOption === 'usdtTron' ? 'bg-blue-600' : 'bg-gray-600'
-                    } text-white hover:bg-blue-700 transition-colors`}
-                  >
-                    USDT (TRON)
-                  </button>
-                </div>
-
-                {savingsOption === 'bancosColombia' && (
-                  <div className="mt-4 text-center p-4 bg-gray-800 rounded">
-                    <p className="text-lg">@3014375496</p>
-                    <p className="text-xs mt-2">Usa esta llave para realizar transferencias desde cualquier banco en Colombia. La cantidad no debe ser superior a 1.000.000 Pesos, una vez realizada la transferencia, enviar el comprobante haciendo click en &apos;Contacto&apos;. si requieres cantidades mayores, hacer click primero en &apos;Contacto&apos;</p>
-                  </div>
-                )}
-
-                {savingsOption === 'bancosEuropa' && (
-                  <div className="mt-4 text-center p-4 bg-gray-800 rounded text-xs">
-                    <p>My IBAN account details:</p>
-                    <p>Recipient name: Bridge Building Sp. Z.o.o.</p>
-                    <p>IBAN: LU77 4080 0000 4178 5760</p>
-                    <p>Bank name and address: Banking Circle S.A, 2 Boulevard de la Foire Luxembourg City L-1528 Luxembourg</p>
-                  </div>
-                )}
-
-                {savingsOption === 'bancosUSA' && (
-                  <div className="mt-4 text-center p-4 bg-gray-800 rounded text-xs">
-                    <p>Recipient name: David Leonardo Paniagua Pimienta</p>
-                    <p>Recipient address: 200 North LaSalle St, Suite 2650</p>
-                    <p>Chicago, IL 60601</p>
-                    <p>Routing Number: 101019644</p>
-                    <p>Account Number: 212277376240</p>
-                    <p>Bank Name: Lead Bank</p>
-                    <p>Bank Address: 1801 Main St., Kansas City, MO 64108</p>
-                  </div>
-                )}
-
-                {savingsOption === 'btcLightning' && (
+                  {savingsOption === 'btcLightning' && (
                   <div className="mt-4">
                     <h3 className="text-lg font-semibold mb-2 text-center">Savings (BTC Lightning)</h3>
                     <input
@@ -1533,8 +1573,50 @@ const resetUsdtTronDeposit = () => {
                     {savingsError && <p className="text-red-400 mt-2">{savingsError}</p>}
                   </div>
                 )}
-
-                {savingsOption === 'usdtPolygon' && (
+                  <button
+                    onClick={() => setSavingsOption('bancosEuropa')}
+                    className={`px-4 py-2 rounded ${
+                      savingsOption === 'bancosEuropa' ? 'bg-blue-600' : 'bg-gray-600'
+                    } text-white hover:bg-blue-700 transition-colors`}
+                  >
+                    Bancos Europa
+                  </button>
+                  {savingsOption === 'bancosEuropa' && (
+                  <div className="mt-4 text-center p-4 bg-gray-800 rounded text-xs">
+                    <p>My IBAN account details:</p>
+                    <p>Recipient name: Bridge Building Sp. Z.o.o.</p>
+                    <p>IBAN: LU77 4080 0000 4178 5760</p>
+                    <p>Bank name and address: Banking Circle S.A, 2 Boulevard de la Foire Luxembourg City L-1528 Luxembourg</p>
+                  </div>
+                  )}
+                  <button
+                    onClick={() => setSavingsOption('bancosUSA')}
+                    className={`px-4 py-2 rounded ${
+                      savingsOption === 'bancosUSA' ? 'bg-blue-600' : 'bg-gray-600'
+                    } text-white hover:bg-blue-700 transition-colors`}
+                  >
+                    Bancos USA
+                  </button>
+                  {savingsOption === 'bancosUSA' && (
+                  <div className="mt-4 text-center p-4 bg-gray-800 rounded text-xs">
+                    <p>Recipient name: David Leonardo Paniagua Pimienta</p>
+                    <p>Recipient address: 200 North LaSalle St, Suite 2650</p>
+                    <p>Chicago, IL 60601</p>
+                    <p>Routing Number: 101019644</p>
+                    <p>Account Number: 212277376240</p>
+                    <p>Bank Name: Lead Bank</p>
+                    <p>Bank Address: 1801 Main St., Kansas City, MO 64108</p>
+                  </div>
+                )}
+                  <button
+                    onClick={() => setSavingsOption('usdtPolygon')}
+                    className={`px-4 py-2 rounded ${
+                      savingsOption === 'usdtPolygon' ? 'bg-blue-600' : 'bg-gray-600'
+                    } text-white hover:bg-blue-700 transition-colors`}
+                  >
+                    USDT (Polygon)
+                  </button>
+                  {savingsOption === 'usdtPolygon' && (
                   
                   <div className="mt-4">
                     <h3 className="text-lg font-semibold mb-2 text-center">Savings (USDT on Polygon)</h3>
@@ -1638,8 +1720,15 @@ const resetUsdtTronDeposit = () => {
                     {usdtError && <p className="text-red-400 mt-2">{usdtError}</p>}
                   </div>
                 )}
-
-                {savingsOption === 'usdtTron' && (
+                  <button
+                    onClick={() => setSavingsOption('usdtTron')}
+                    className={`px-4 py-2 rounded ${
+                      savingsOption === 'usdtTron' ? 'bg-blue-600' : 'bg-gray-600'
+                    } text-white hover:bg-blue-700 transition-colors`}
+                  >
+                    USDT (TRON)
+                  </button>
+                  {savingsOption === 'usdtTron' && (
                   <div className="bg-black/50 p-4 rounded">
                     <h3 className="font-bold text-blue-400">USDT TRON</h3>
                     <input
@@ -1699,8 +1788,7 @@ const resetUsdtTronDeposit = () => {
                     </button>
                   </div>
                 )}
-
-
+                </div>
               </div>
             )}
           </div>
@@ -1725,33 +1813,7 @@ const resetUsdtTronDeposit = () => {
                   >
                     Bancos Colombia
                   </button>
-                  <button
-                    onClick={() => setWithdrawalOption('bancosInternacionales')}
-                    className={`px-4 py-2 rounded ${
-                      withdrawalOption === 'bancosInternacionales' ? 'bg-blue-600' : 'bg-gray-600'
-                    } text-white hover:bg-blue-700 transition-colors`}
-                  >
-                    Bancos Internacionales
-                  </button>
-                  <button
-                    onClick={() => setWithdrawalOption('btcLightning')}
-                    className={`px-4 py-2 rounded ${
-                      withdrawalOption === 'btcLightning' ? 'bg-blue-600' : 'bg-gray-600'
-                    } text-white hover:bg-blue-700 transition-colors`}
-                  >
-                    BTC Lightning Wallet
-                  </button>
-                  <button
-                    onClick={() => setWithdrawalOption('usdtWallet')}
-                    className={`px-4 py-2 rounded ${
-                      withdrawalOption === 'usdtWallet' ? 'bg-blue-600' : 'bg-gray-600'
-                    } text-white hover:bg-blue-700 transition-colors`}
-                  >
-                    USDT Wallet
-                  </button>
-                </div>
-                {/* Withdrawal options content will go here later */}
-                {withdrawalOption === 'bancosColombia' && (
+                  {withdrawalOption === 'bancosColombia' && (
                   <div className="mt-4">
                     <input
                       type="text"
@@ -1797,8 +1859,16 @@ const resetUsdtTronDeposit = () => {
                     <p className="text-xs mt-2 text-gray-400">Puedes usar tu llave o tu cuenta bancaria. Recuerda que usando la llave, el limite es de 1.000.000 Pesos.</p>
                     <p className="text-xs mt-2 text-gray-400">0,8% comision de retiro</p>
                   </div>
-                )}
-                {withdrawalOption === 'bancosInternacionales' && (
+                  )}
+                  <button
+                    onClick={() => setWithdrawalOption('bancosInternacionales')}
+                    className={`px-4 py-2 rounded ${
+                      withdrawalOption === 'bancosInternacionales' ? 'bg-blue-600' : 'bg-gray-600'
+                    } text-white hover:bg-blue-700 transition-colors`}
+                  >
+                    Bancos Internacionales
+                  </button>
+                  {withdrawalOption === 'bancosInternacionales' && (
                   <div className="mt-4">
                     <input
                       type="text"
@@ -1872,8 +1942,73 @@ const resetUsdtTronDeposit = () => {
                     </button>
                      <p className="text-xs mt-2 text-gray-400">1% comision de retiro. 1 a 3 dias hábiles</p>
                   </div>
-                )}
-                
+                  )}
+                  <button
+                    onClick={() => setWithdrawalOption('btcLightning')}
+                    className={`px-4 py-2 rounded ${
+                      withdrawalOption === 'btcLightning' ? 'bg-blue-600' : 'bg-gray-600'
+                    } text-white hover:bg-blue-700 transition-colors`}
+                  >
+                    BTC Lightning Wallet
+                  </button>
+                  {withdrawalOption === 'btcLightning' && (
+                  <div className="mt-4">
+                    {!showScanner && (
+                      <button onClick={() => setShowScanner(true)} className="w-full px-4 py-2 bg-purple-600 rounded text-white mb-2">
+                        Scan QR Code
+                      </button>
+                    )}
+                    {showScanner && (
+                      <QrScanner
+                        onScanSuccess={(text) => {
+                          handleBolt11(text);
+                          setShowScanner(false); // Hide to revoke access immediately
+                        }}
+                        onScanError={(err) => {
+                          setScannerError(err);
+                          setShowScanner(false); // Revoke on error too
+                        }}
+                      />
+                    )}
+                    <button onClick={handlePasteFromClipboard} className="text-xs underline text-gray-400 w-full px-4 py-2 rounded text-white">
+                      Paste from Clipboard
+                    </button>
+                    {withdrawalQuote && (
+                      <div className="text-xs bg-gray-700 p-4 rounded mb-4">
+                        <p>Amount: {withdrawalQuote.amountSats} sats</p>
+                        <p>Base Fee: {withdrawalQuote.baseFee} sats</p>
+                        <p>Partner Fee: {withdrawalQuote.partnerFee} sats</p>
+                        <p>Total: {withdrawalQuote.totalSats} sats</p>
+                        {/* Only show Confirm button for admin user */}
+                        {user?.uid === '5XgksHrgmyeGqqKFYGVjQVM0KGl1' && (
+                        <button
+                          onClick={handleConfirmPayment}
+                          disabled={withdrawalPaymentStatus === 'pending' || withdrawalPaymentStatus === 'success'}
+                          className="text-m w-full mt-2 px-4 py-2 bg-green-600 rounded text-white disabled:bg-gray-500"
+                        >
+                          Confirm
+                        </button>
+                        )}
+                      </div>
+                    )}
+                    {withdrawalPaymentStatus === 'pending' && <p className="text-yellow-400">Processing...</p>}
+                    {withdrawalPaymentStatus === 'success' && <p className="text-green-400">Success!</p>}
+                    {withdrawalPaymentStatus === 'failure' && <p className="text-red-400">Failed. Retry.</p>}
+                    {(withdrawalPaymentStatus === 'success' || withdrawalPaymentStatus === 'failure') && (
+                      <button onClick={resetWithdrawal} className="mt-2 px-4 py-2 bg-gray-600 rounded">Scan Again</button>
+                    )}
+                    {scannerError && <p className="text-red-400">{scannerError}</p>}
+                  </div>
+                  )}
+                  <button
+                    onClick={() => setWithdrawalOption('usdtWallet')}
+                    className={`px-4 py-2 rounded ${
+                      withdrawalOption === 'usdtWallet' ? 'bg-blue-600' : 'bg-gray-600'
+                    } text-white hover:bg-blue-700 transition-colors`}
+                  >
+                    USDT Wallet
+                  </button>
+                </div>
               </div>
             )}
           </div>
