@@ -1,11 +1,10 @@
 // src/app/api/lndProxy/[...path]/route.ts
 import { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import { getAuth } from 'firebase-admin/auth';
-import { initializeApp } from 'firebase-admin/app';
 import { RateLimiterMemory } from 'rate-limiter-flexible'; // npm install (free lib)
+import { adminAuth } from '@/app/lib/firebase-admin'; // our initialized admin auth
 
-const app = initializeApp();
+
 const limiter = new RateLimiterMemory({ points: 10, duration: 60 }); // 10/min per IP
 
 interface LndInvoiceRequest {
@@ -36,7 +35,7 @@ export async function POST(req: NextRequest) {
 
   const idToken = authHeader.split('Bearer ')[1];
   try {
-    await getAuth(app).verifyIdToken(idToken);
+    await adminAuth.verifyIdToken(idToken);
   } catch {
     return new NextResponse(JSON.stringify({ error: 'Unauthorized: Invalid token' }), { status: 401 });
   }
@@ -133,7 +132,7 @@ export async function GET(req: NextRequest) {
 
   const idToken = authHeader.split('Bearer ')[1];
   try {
-    await getAuth(app).verifyIdToken(idToken);
+    await adminAuth.verifyIdToken(idToken);
   } catch {
     return new NextResponse(JSON.stringify({ error: 'Unauthorized: Invalid token' }), { status: 401 });
   }
