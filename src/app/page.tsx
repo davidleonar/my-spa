@@ -4,7 +4,7 @@ import '../app/globals.css';
 import { ArrowsUpDownIcon } from '@heroicons/react/24/outline';
 import { QRCodeCanvas } from 'qrcode.react'; 
 import { auth, database } from '../app/lib/firebase'; // Adjust path
-import { ref, set, serverTimestamp } from "firebase/database";
+import { ref, set, push, serverTimestamp } from "firebase/database";
 import {
   GoogleAuthProvider,
   signInWithPopup,
@@ -135,6 +135,8 @@ export default function Home() {
 
   // State for rendering automatico
   const [isClient, setIsClient] = useState(false);
+
+  const [withdrawalError, setWithdrawalError] = useState<string | null>(null);  // Add for UX feedback
 
   //States para login
   const [user, loadingAuth, errorAuth] = useAuthState(auth);
@@ -781,11 +783,10 @@ const handleSignOut = () => {
   };
 
   const handleWithdrawalSubmit = async () => {
-    if (!user) {
-      // Handle not logged in user
-      alert('You must be logged in to make a withdrawal.');
-      return;
-    }
+    if (!user?.uid) {
+    setWithdrawalError('You must be logged in to submit a withdrawal.');
+    return;  // Early exit for unauth
+  }
 
     if (!withdrawalName || !withdrawalId || !withdrawalBank || !withdrawalBankName || !withdrawalAmount) {
       // Handle form validation
@@ -793,68 +794,59 @@ const handleSignOut = () => {
       return;
     }
 
-    const withdrawalData = {
+    // Structure data (teaching: Use interfaces for type safety)
+    interface WithdrawalData {
+      userId: string;
+      userEmail: string | null;
+      name: string;
+      id: string;
+      bankData: string;
+      bankName: string;
+      country: string;
+      amount: string;
+      option: 'bancosColombia' | 'bancosInternacionales' | 'btcLightning' | 'usdtWallet' | null;
+      timestamp: unknown;  // ServerTimestamp
+      status: 'pending';
+    }
+
+    const withdrawalData: WithdrawalData = {
       userId: user.uid,
-      name: withdrawalName,
+      userEmail: user.email,
+      name: withdrawalName.trim(),  // Sanitize inputs
       id: withdrawalId,
-      bank: withdrawalBank,
-      bankName: withdrawalBankName,
-      amount: withdrawalAmount,
-      timestamp: serverTimestamp(),
-    };
-
-    try {
-      await set(ref(database, `withdrawals/${user.uid}/${Date.now()}`), withdrawalData);
-      // Reset form fields
-      setWithdrawalName('');
-      setWithdrawalId('');
-      setWithdrawalBank('');
-      setWithdrawalBankName('');
-      setWithdrawalAmount('');
-      alert('Withdrawal request submitted successfully!');
-    } catch (err: unknown) {  // Change 'any' to 'unknown'
-      console.error('Error submitting withdrawal:', err);
-      let userMessage = 'Failed to submit withdrawal. Please try again.';
-      if (err instanceof Error && err.message === 'PERMISSION_DENIED') {  // Narrow type via guards
-        userMessage = 'Access denied: You may not have permission for this action. Please check your login.';
-      } else if (err instanceof Error && err.message?.includes('auth')) {
-        userMessage = 'Authentication error: Please sign in again.';
-      }
-      alert(userMessage);
-    }
-};
-
-  const handleIntWithdrawalSubmit = async () => {
-    if (!user) {
-      alert('You must be logged in to make a withdrawal.');
-      return;
-    }
-
-    if (!withdrawalName || !withdrawalId || !withdrawalBank || !withdrawalBankName || !withdrawalCountry || !withdrawalAmount) {
-      alert('Please fill out all fields.');
-      return;
-    }
-
-    const intWithdrawalData = {
-      userId: user.uid,
-      name: withdrawalName,
-      id: withdrawalId,
-      bank: withdrawalBank,
+      bankData: withdrawalBank,
       bankName: withdrawalBankName,
       country: withdrawalCountry,
       amount: withdrawalAmount,
+      option: withdrawalOption,
       timestamp: serverTimestamp(),
+      status: 'pending',
     };
 
     try {
-      await set(ref(database, `IntWithdrawals/${user.uid}/${Date.now()}`), intWithdrawalData);
+      // Determine path (teaching: Conditional logic for domestic/int'l)
+      //const basePath = withdrawalOption === 'bancosInternacionales' 
+      //  ? 'IntWithdrawals' 
+      //  : 'withdrawals';
+      const refPath = `${'withdrawals'}/${user.uid}`;
+
+      // Use push() for unique ID (teaching: Firebase auto-generates timestamp-based keys)
+      const newRef = push(ref(database, refPath));
+      await set(newRef, withdrawalData);
+
+      // UX Feedback (teaching: Use libraries like react-toastify for better modals)
+      alert('Withdrawal request submitted successfully. The admin has been notified via email.');
+      setWithdrawalError(null);  // Clear errors
+
+      // Reset form (teaching: Prevent resubmits; use useState setters)
       setWithdrawalName('');
       setWithdrawalId('');
       setWithdrawalBank('');
       setWithdrawalBankName('');
       setWithdrawalCountry('');
       setWithdrawalAmount('');
-      alert('International withdrawal request submitted successfully!');
+      setWithdrawalOption(null);
+
     } catch (err: unknown) {  // Change 'any' to 'unknown'
       console.error('Error submitting withdrawal:', err);
       let userMessage = 'Failed to submit withdrawal. Please try again.';
@@ -866,6 +858,8 @@ const handleSignOut = () => {
       alert(userMessage);
     }
 };
+
+  
 
 /* ------------------------------------------------------------------ */
 /*  Para manejar el deposito USDT Polygon                             */
@@ -1274,6 +1268,9 @@ const resetUsdtTronDeposit = () => {
   setUsdtTronPaymentStatus(null);
   setUsdtTronError(null);
 };
+
+
+
 
   /*
   if (loadingAuth) {
@@ -1855,6 +1852,7 @@ const resetUsdtTronDeposit = () => {
                     >
                       Submit Withdrawal
                     </button>
+                    {withdrawalError && <p className="text-red-400 mt-2">{withdrawalError}</p>}
                     <p className="text-xs mt-2 text-gray-400">Puedes usar tu llave o tu cuenta bancaria. Recuerda que usando la llave, el limite es de 1.000.000 Pesos.</p>
                     <p className="text-xs mt-2 text-gray-400">0,8% comision de retiro</p>
                   </div>
@@ -1934,7 +1932,7 @@ const resetUsdtTronDeposit = () => {
                       )}
                     </div>
                     <button
-                      onClick={handleIntWithdrawalSubmit}
+                      onClick={handleWithdrawalSubmit}
                       className="w-full px-4 py-2 bg-blue-600 rounded text-white"
                     >
                       Submit International Withdrawal
