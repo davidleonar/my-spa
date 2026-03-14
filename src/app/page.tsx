@@ -26,7 +26,6 @@ import { countries } from 'countries-list';
 import Image from 'next/image';
 import { ethers } from 'ethers';
 import { useMetaMask } from '@/app/lib/useMetaMask';
-import { useTronWallet } from '@/app/lib/useTronWallet';
 import  QrScanner  from './components/QrScanner';
 import * as bolt11Lib from 'bolt11'; // Rename to avoid conflicts
 
@@ -89,7 +88,6 @@ export default function Home() {
   // MetaMask hook
   const { provider, account, connect, disconnect, isConnecting, error: metamaskError } = useMetaMask();
   const [registrationStatus, setRegistrationStatus] = useState<'pending' | 'success' | null>(null);
-  const { provider: tronProvider, account: tronAccount, connect: connectTron, disconnect: disconnectTron, isConnecting: isTronConnecting } = useTronWallet();
 
   // States for donations
   const [donationAmount, setDonationAmount] = useState<number>(1000); // Default 1000 sats
@@ -106,7 +104,7 @@ export default function Home() {
 
   // States for savings
   const [showSavings, setShowSavings] = useState<boolean>(false);
-  const [savingsOption, setSavingsOption] = useState<'bancosColombia' | 'btcLightning' | 'bancosEuropa' | 'bancosUSA' | 'usdtPolygon' | 'usdtTron' | null>(null);
+  const [savingsOption, setSavingsOption] = useState<'bancosColombia' | 'btcLightning' | 'bancosEuropa' | 'bancosUSA' | 'usdtPolygon' | null>(null);
   const [savingsAmount, setSavingsAmount] = useState<number>(1000);
   const [savingsBolt11, setSavingsBolt11] = useState<string | null>(null);
   const [savingsPaymentStatus, setSavingsPaymentStatus] = useState<'pending' | 'settled' | null>(null);
@@ -150,12 +148,6 @@ export default function Home() {
   const [usdtTxHash, setUsdtTxHash] = useState<string | null>(null); // Transaction hash for tracking
   const [usdtPaymentStatus, setUsdtPaymentStatus] = useState<'pending' | 'confirmed' | null>(null);
   const [usdtError, setUsdtError] = useState<string | null>(null);
-
-  const [usdtTronSavingsAmount, setUsdtTronSavingsAmount] = useState<number>(30); // Amount in USDT (e.g., 10.00)
-  const [usdtTronTxHash, setUsdtTronTxHash] = useState<string | null>(null); // Transaction hash for tracking
-  const [usdtTronPaymentStatus, setUsdtTronPaymentStatus] = useState<'pending' | 'confirmed' | null>(null);
-  const [usdtTronError, setUsdtTronError] = useState<string | null>(null);
-  const [copySavingsButtonTextusdtTron, setCopySavingsButtonTextusdtTron] = useState<string>("Copy USDT TRON Address");
 
   // States para Taproot Assets
   const [showAdminAssets, setShowAdminAssets] = useState(false);
@@ -927,102 +919,6 @@ const handleUsdtDeposit = async () => {
   }
 };
 
-const handleCopySavingsRequestusdtTron = async () => {
-    if (!process.env.NEXT_PUBLIC_APP_TRON_WALLET_ADDRESS) {
-      setCopySavingsButtonTextusdtTron("No USDT Address");
-      setTimeout(() => setCopySavingsButtonTextusdtTron("Copy Payment Request"), 2000);
-      return;
-    }
-  
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(process.env.NEXT_PUBLIC_APP_TRON_WALLET_ADDRESS);
-        setCopySavingsButtonTextusdtTron("Copied!");
-        setTimeout(() => setCopySavingsButtonTextusdtTron("Copy USDT Address"), 2000);
-      } else {
-        const textArea = document.createElement("textarea");
-        textArea.value = process.env.NEXT_PUBLIC_APP_TRON_WALLET_ADDRESS;
-        document.body.appendChild(textArea);
-        textArea.select();
-        try {
-          document.execCommand("copy");
-          setCopySavingsButtonTextusdtTron("Copied!");
-          setTimeout(() => setCopySavingsButtonTextusdtTron("Copy USDT Address"), 2000);
-        } catch {
-          throw new Error("Clipboard copy failed via fallback");
-        } finally {
-          document.body.removeChild(textArea);
-        }
-      }
-    } catch (err) {
-      console.error("Clipboard error:", err);
-      setCopySavingsButtonTextusdtTron("Copy Failed");
-      setTimeout(() => setCopySavingsButtonTextusdtTron("Copy USDT Address"), 2000);
-      }
-  };
-
-/* ------------------------------------------------------------------ */
-/*  Para manejar el deposito USDT TRON                                */
-/* ------------------------------------------------------------------ */
-const handleUsdtTronDeposit = async () => {
-  if (!tronProvider || !tronAccount || !user?.uid) {
-    setUsdtTronError('Wallet not connected or user not authenticated');
-    return;
-  }
-
-  setUsdtTronError(null);
-  setUsdtTronPaymentStatus('pending');
-
-  try {
-    const signer = await tronProvider.getSigner();
-    const usdtContract = new ethers.Contract(
-      process.env.NEXT_PUBLIC_USDT_TRON_CONTRACT_ADDRESS!,
-      USDT_ABI,
-      signer
-    );
-
-    const amount = ethers.parseUnits(usdtTronSavingsAmount.toString(), 6); // 6 decimals
-
-    const tx = await usdtContract.transfer(
-      process.env.NEXT_PUBLIC_TRON_APP_WALLET_ADDRESS!,
-      amount
-    );
-
-    setUsdtTronTxHash(tx.hash);
-
-    const receipt = await tx.wait(1); // Wait 1 confirmation (~3s on TRON)
-    setUsdtTronPaymentStatus('confirmed');
-
-    // Register in RTDB
-    const savingsRef = ref(database, `userSavings/${user.uid}/${tx.hash}`);
-    await set(savingsRef, {
-      userId: user.uid,
-      amount: usdtTronSavingsAmount,
-      txHash: tx.hash,
-      timestamp: serverTimestamp(),
-      network: 'TRON', // Matches route.ts
-      receipt: { // Optional: Store minimal receipt info (avoid full for size)
-        blockNumber: receipt.blockNumber,
-        gasUsed: receipt.gasUsed.toString(),
-      },
-      // Optional: chain: 'tron', status: 'confirmed', receipt: { blockNumber: receipt.blockNumber }
-    });
-
-    console.log('TRON deposit registered in RTDB');
-    // Success feedback + cleanup
-    // You can add toast/notification here if you have one
-    setTimeout(() => {
-      resetUsdtTronDeposit();
-    }, 5000); // Give user time to see success message (adjust as needed)
-
-
-  } catch (err: unknown) {
-    setUsdtTronError((err as Error).message || 'Deposit failed');
-    setUsdtTronPaymentStatus(null);
-    console.error(err);
-  }
-};
-
 /* ------------------------------------------------------------------ */
 /*  BTC Withdrawals                                                   */
 /* ------------------------------------------------------------------ */
@@ -1260,16 +1156,6 @@ const resetUsdtPolygonDeposit = () => {
   setUsdtError(null);
   // Optional: keep registrationStatus if you have separate UI for it
 };
-
-// Reset functions for TRON USDT
-const resetUsdtTronDeposit = () => {
-  setUsdtTronSavingsAmount(30);               // default value
-  setUsdtTronTxHash(null);
-  setUsdtTronPaymentStatus(null);
-  setUsdtTronError(null);
-};
-
-
 
 
   /*
@@ -1714,74 +1600,6 @@ const resetUsdtTronDeposit = () => {
                       ) : null}
                     
                     {usdtError && <p className="text-red-400 mt-2">{usdtError}</p>}
-                  </div>
-                )}
-                  <button
-                    onClick={() => setSavingsOption('usdtTron')}
-                    className={`px-4 py-2 rounded ${
-                      savingsOption === 'usdtTron' ? 'bg-blue-600' : 'bg-gray-600'
-                    } text-white hover:bg-blue-700 transition-colors`}
-                  >
-                    USDT (TRON)
-                  </button>
-                  {savingsOption === 'usdtTron' && (
-                  <div className="bg-black/50 p-4 rounded">
-                    <h3 className="font-bold text-blue-400">USDT TRON</h3>
-                    <input
-                      type="number"
-                      value={usdtTronSavingsAmount}
-                      onChange={(e) => setUsdtTronSavingsAmount(parseFloat(e.target.value) || 30)}
-                      placeholder="Amount (USDT)"
-                      className="w-full p-2 bg-gray-800 rounded mt-2"
-                    />
-                    {!tronAccount ? (
-                      <button
-                        onClick={connectTron}
-                        disabled={isTronConnecting}
-                        className="w-full mt-2 px-4 py-2 bg-indigo-600 rounded text-white hover:bg-indigo-700 disabled:bg-gray-500"
-                      >
-                        {isTronConnecting ? 'Opening MetaMask…' : 'Connect Wallet (MetaMask)'}
-                      </button>
-                    ) : (
-                      <div className="text-center mt-2">
-                        <p className="text-sm text-green-400">✓ Connected: {tronAccount.slice(0,6)}...{tronAccount.slice(-4)}</p>
-                        <button onClick={disconnectTron} className="text-xs underline text-gray-400">Disconnect</button>
-                      </div>
-                    )}
-                    {tronAccount && usdtTronSavingsAmount > 0 && (
-                      <button
-                        onClick={handleUsdtTronDeposit}
-                        disabled={usdtTronPaymentStatus === 'pending'}
-                        className="w-full mt-3 px-4 py-2 bg-green-600 rounded text-white"
-                      >
-                        {usdtTronPaymentStatus === 'pending' ? 'Sending…' : 'Send USDT → Savings'}
-                      </button>
-                    )}
-                    {usdtTronTxHash && (
-                      <p className="text-sm text-gray-300 break-all">
-                        Tx Hash: {usdtTronTxHash} (<a href={`https://tronscan.org/tx/${usdtTronTxHash}`} target="_blank" rel="noopener noreferrer" className="text-blue-400">View on Tronscan</a>)
-                      </p>
-                    )}
-                    {usdtTronPaymentStatus === 'confirmed' && (
-                      <div className="mt-3 p-3 bg-green-900/30 rounded border border-green-500">
-                        <p className="text-green-400 font-medium">✓ Deposit confirmed and registered!</p>
-                        <p className="text-green-300 text-sm mt-1">You can make another deposit in a few seconds…</p>
-                        {/* Optional instant-reset button */}
-                        <button
-                          onClick={resetUsdtTronDeposit}
-                          className="mt-3 w-full px-4 py-2 bg-green-700 hover:bg-green-600 rounded text-white text-sm"
-                        >
-                          New Deposit Now
-                        </button>
-                      </div>
-                    )}
-                    {usdtTronError && <p className="text-red-400 mt-2">{usdtTronError}</p>}
-                    <button
-                      onClick={handleCopySavingsRequestusdtTron}
-                      className="w-full mt-2 px-4 py-2 bg-gray-600 rounded text-white"
-                    >
-                      {copySavingsButtonTextusdtTron}
-                    </button>
                   </div>
                 )}
                 </div>
