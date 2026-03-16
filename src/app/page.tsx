@@ -318,34 +318,31 @@ export default function Home() {
 };
 
 useEffect(() => {
-  if (user?.uid !== '5XgksHrgmyeGqqKFYGVjQVM0KGl1') {
-    console.log('Not admin - skipping fetch');
-    return;
-  }
+  if (user?.uid !== '5XgksHrgmyeGqqKFYGVjQVM0KGl1') return;
 
   const withdrawalsRef = ref(database, 'withdrawals');
   const unsubscribe = onValue(withdrawalsRef, (snapshot) => {
-    console.log('Snapshot received:', snapshot.exists() ? 'Data present' : 'No data');
+    //console.log('Snapshot received:', snapshot.exists() ? 'Data present' : 'No data');
     const filtered: BankWithdrawal[] = [];
     snapshot.forEach((userSnap) => {
-      console.log(`User: ${userSnap.key}`);
+      //console.log(`User: ${userSnap.key}`);
       userSnap.forEach((reqSnap) => {
         const data = reqSnap.val();
-        console.log(`Request: ${reqSnap.key}, Data:`, data);  // Log full entry
+        //console.log(`Request: ${reqSnap.key}, Data:`, data);  // Log full entry
         if (data.status === 'pending' && 
             (data.option === 'bancosColombia' || data.option === 'bancosInternacionales')) {
-          console.log('Matched:', data);
+          //console.log('Matched:', data);
           filtered.push({
             uid: userSnap.key!,
             requestId: reqSnap.key!,
             ...data,
           });
         } else {
-          console.log('Filtered out:', data);  // Why rejected?
+          // Why rejected? console.log('Filtered out:', data);  
         }
       });
     });
-    console.log('Filtered array:', filtered);
+    //console.log('Filtered array:', filtered);
     setPendingBankWithdrawals(filtered);
   }, (error) => {
     console.error('onValue error:', error);  // Catch listener errors
