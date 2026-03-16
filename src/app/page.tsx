@@ -4,7 +4,7 @@ import '../app/globals.css';
 import { ArrowsUpDownIcon } from '@heroicons/react/24/outline';
 import { QRCodeCanvas } from 'qrcode.react'; 
 import { auth, database } from '../app/lib/firebase'; // Adjust path
-import { ref, set, push, serverTimestamp } from "firebase/database";
+import { ref, set, push, serverTimestamp, onValue, update } from "firebase/database";
 import {
   GoogleAuthProvider,
   signInWithPopup,
@@ -69,6 +69,21 @@ interface InvoiceStatus {
   settle_date: string;  // Unix timestamp when settled
   amt_paid_sat: string; // Amount paid in satoshis
   // ... other fields as needed
+}
+
+interface BankWithdrawal {
+  uid: string;
+  requestId: string;
+  userEmail?: string;  // Or 'email'
+  amount: number;      // COP for banks
+  option: 'bancosColombia' | 'bancosInternacionales';
+  name?: string;
+  bank?: string;
+  bankName?: string;
+  country?: string;
+  timestamp: number;   // Unix ms
+  status?: string;
+  // Add other fields as stored
 }
 
 export default function Home() {
@@ -175,6 +190,13 @@ export default function Home() {
   const [syncLoading, setSyncLoading] = useState<boolean>(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+
+  // States for bank wwithdrawals
+  const [showPendingWithdrawals, setShowPendingWithdrawals] = useState<boolean>(false);
+  const [pendingBankWithdrawals, setPendingBankWithdrawals] = useState<BankWithdrawal[]>([]);
+  const [selectedBankWithdrawal, setSelectedBankWithdrawal] = useState<BankWithdrawal | null>(null);
+  const [settleLoading, setSettleLoading] = useState<boolean>(false);
+  const [settleError, setSettleError] = useState<string | null>(null);
 
   // Para el rendering automatico
   useEffect(() => {
@@ -295,6 +317,42 @@ export default function Home() {
   }
 };
 
+useEffect(() => {
+  if (user?.uid !== '5XgksHrgmyeGqqKFYGVjQVM0KGl1') {
+    console.log('Not admin - skipping fetch');
+    return;
+  }
+
+  const withdrawalsRef = ref(database, 'withdrawals');
+  const unsubscribe = onValue(withdrawalsRef, (snapshot) => {
+    console.log('Snapshot received:', snapshot.exists() ? 'Data present' : 'No data');
+    const filtered: BankWithdrawal[] = [];
+    snapshot.forEach((userSnap) => {
+      console.log(`User: ${userSnap.key}`);
+      userSnap.forEach((reqSnap) => {
+        const data = reqSnap.val();
+        console.log(`Request: ${reqSnap.key}, Data:`, data);  // Log full entry
+        if (data.status === 'pending' && 
+            (data.option === 'bancosColombia' || data.option === 'bancosInternacionales')) {
+          console.log('Matched:', data);
+          filtered.push({
+            uid: userSnap.key!,
+            requestId: reqSnap.key!,
+            ...data,
+          });
+        } else {
+          console.log('Filtered out:', data);  // Why rejected?
+        }
+      });
+    });
+    console.log('Filtered array:', filtered);
+    setPendingBankWithdrawals(filtered);
+  }, (error) => {
+    console.error('onValue error:', error);  // Catch listener errors
+  });
+
+  return () => unsubscribe();
+}, [user]);
 
   // Usage examples:
 
@@ -1148,6 +1206,55 @@ const handleSync = async () => {
   }
 };
 
+//---------------------------------------------------------------- */
+// Handle bank Settlement state
+//---------------------------------------------------------------- */
+
+const handleSettle = async (wd: BankWithdrawal) => {
+  setSettleLoading(true);
+  setSettleError(null);
+  try {
+    const ts = wd.timestamp;
+    if (!ts) throw new Error('Missing timestamp');
+    const startTime = ts - 60000;  // 1min before
+    const endTime = ts + 60000;    // 1min after
+
+    // BTC/USDT (close price [4])
+    const btcUrl = `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&startTime=${startTime}&endTime=${endTime}&limit=1`;
+    const btcRes = await fetch(btcUrl);
+    if (!btcRes.ok) throw new Error('Binance BTC error');
+    const btcData: number[][] = await btcRes.json();
+    if (!btcData[0]) throw new Error('No BTC data');
+    const btcUsdt = btcData[0][4];
+
+    // USDT/COP (USDTCOP symbol; COP per USDT)
+    const copUrl = `https://api.binance.com/api/v3/klines?symbol=USDTCOP&interval=1m&startTime=${startTime}&endTime=${endTime}&limit=1`;
+    const copRes = await fetch(copUrl);
+    if (!copRes.ok) throw new Error('Binance COP error');
+    const copData: number[][] = await copRes.json();
+    if (!copData[0]) throw new Error('No COP data');
+    const usdtCop = copData[0][4];
+
+    // Total COP (assume wd.amount is COP)
+    const totalCop = wd.amount;
+
+    // Update RTDB
+    const wdRef = ref(database, `withdrawals/${wd.uid}/${wd.requestId}`);
+    await update(wdRef, {
+      status: 'settled',
+      receipt: { btcUsdt, usdtCop, totalCop },
+    });
+
+    // Close and refresh list (box disappears via state)
+    setSelectedBankWithdrawal(null);
+  } catch (err: unknown) {
+    const error = err as Error;
+    setSettleError(error.message);
+  } finally {
+    setSettleLoading(false);
+  }
+};
+
 // Reset functions for Polygon USDT
 const resetUsdtPolygonDeposit = () => {
   setUsdtSavingsAmount(10);                    // or keep last amount if preferred
@@ -1647,7 +1754,7 @@ const resetUsdtPolygonDeposit = () => {
                       type="number"
                       value={withdrawalAmount}
                       onChange={(e) => setWithdrawalAmount(e.target.value)}
-                      placeholder="Cantidad"
+                      placeholder="Cantidad en COP"
                       className="w-full p-2 bg-gray-600 rounded text-white mb-2"
                     />
                     <textarea
@@ -1703,7 +1810,7 @@ const resetUsdtPolygonDeposit = () => {
                       type="number"
                       value={withdrawalAmount}
                       onChange={(e) => setWithdrawalAmount(e.target.value)}
-                      placeholder="Cantidad"
+                      placeholder="Cantidad en COP"
                       className="w-full p-2 bg-gray-600 rounded text-white mb-2"
                     />
                     <textarea
@@ -1883,6 +1990,60 @@ const resetUsdtPolygonDeposit = () => {
           )}
         </div>
         
+        {user?.uid === '5XgksHrgmyeGqqKFYGVjQVM0KGl1' && (
+          <div className="mt-6">
+            <h2 className="text-lg font-bold mb-4 text-center cursor-pointer" onClick={() => setShowPendingWithdrawals(!showPendingWithdrawals)}>
+              Pending Withdrawals {showPendingWithdrawals ? '▲' : '▼'}
+            </h2>
+            {showPendingWithdrawals && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {pendingBankWithdrawals.length === 0 ? (
+                  <p className="text-gray-400 col-span-full text-center">No pending bank withdrawals.</p>
+                ) : (
+                  pendingBankWithdrawals.map((wd) => (
+                    <div
+                      key={wd.requestId}
+                      className="bg-gray-800 p-4 rounded shadow cursor-pointer hover:bg-gray-700 transition-colors w-48"  // Small box
+                      onClick={() => setSelectedBankWithdrawal(wd)}
+                    >
+                      <p className="text-white font-semibold text-sm">Email: {wd.userEmail || 'N/A'}</p>
+                      <p className="text-white text-sm">
+                        Amount: {wd.amount.toLocaleString('de-DE')} COP
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+            {selectedBankWithdrawal && (
+              <div className="mt-4 bg-black/50 p-4 rounded shadow text-sm">
+                <h3 className="font-bold mb-2">Withdrawal Details</h3>
+                <p><strong>User ID:</strong> {selectedBankWithdrawal.uid}</p>
+                <p><strong>Name:</strong> {selectedBankWithdrawal.name}</p>
+                <p><strong>Email:</strong> {selectedBankWithdrawal.userEmail || 'N/A'}</p>
+                <p><strong>Amount:</strong> {selectedBankWithdrawal.amount.toLocaleString('de-DE')} COP</p>
+                <p><strong>Option:</strong> {selectedBankWithdrawal.option}</p>
+                <p><strong>Bank:</strong> {selectedBankWithdrawal.bank || 'N/A'}</p>
+                <p><strong>Bank Name:</strong> {selectedBankWithdrawal.bankName || 'N/A'}</p>
+                <p><strong>Country:</strong> {selectedBankWithdrawal.country || 'N/A'}</p>
+                <p><strong>Timestamp:</strong> {new Date(selectedBankWithdrawal.timestamp).toLocaleString()}</p>
+                <button
+                  onClick={() => handleSettle(selectedBankWithdrawal)}
+                  disabled={settleLoading}
+                  className="mt-2 px-4 py-2 bg-green-600 rounded text-white hover:bg-green-700 disabled:bg-gray-500"
+                >
+                  {settleLoading ? 'Settling...' : 'Settle'}
+                </button>
+                {settleError && <p className="text-red-400 mt-2">{settleError}</p>}
+                <button onClick={() => setSelectedBankWithdrawal(null)} className="ml-2 px-4 py-2 bg-gray-600 rounded text-white hover:bg-gray-700">
+                  Close
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+
         {user?.uid === '5XgksHrgmyeGqqKFYGVjQVM0KGl1' && (
           <div className="mt-6">
             <h2 className="text-lg font-bold mb-4 text-center cursor-pointer" onClick={() => setShowAdminAssets(!showAdminAssets)}>
