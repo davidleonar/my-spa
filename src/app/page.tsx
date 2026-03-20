@@ -1271,15 +1271,25 @@ const resetUsdtPolygonDeposit = () => {
 
  
   return (
-    <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center p-4">
-      <div className="bg-gray-800 p-6 rounded-lg shadow-lg w-full max-w-md">
+    <div className="min-h-screen bg-background bg-glass-gradient text-foreground flex flex-col items-center p-4 sm:p-8 relative overflow-hidden">
+      {/* Dynamic background glow */}
+      <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/20 rounded-full blur-[128px] pointer-events-none"></div>
+      <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-secondary/20 rounded-full blur-[128px] pointer-events-none"></div>
+
+      <h1 className="text-4xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-primary to-secondary mb-8 mt-4 drop-shadow-neon z-10">
+        RENDIMIENTOS
+      </h1>
+
+      <div className="bg-surface border border-surface-border backdrop-blur-xl p-8 rounded-3xl shadow-neon w-full max-w-xl transition-all z-10">
 
       {loadingAuth ? (
-          <p className="text-center">Cargando autenticación...</p>
+          <div className="flex justify-center my-8">
+            <div className="w-8 h-8 border-4 border-t-primary border-gray-600 rounded-full animate-spin"></div>
+          </div>
         ) : user ? (
-          <div className="text-center mb-4">
-            <p>Bienvenido, {user.displayName || user.email}!</p>
-            <button onClick={handleSignOut} className="px-5 py-1 bg-red-800 rounded text-white hover:bg-red-700">
+          <div className="text-center mb-6 pb-6 border-b border-surface-border">
+            <p className="text-lg font-medium text-gray-200 mb-4">Bienvenido, <span className="text-white font-bold">{user.displayName || user.email}</span></p>
+            <button onClick={handleSignOut} className="px-5 py-2 bg-red-500/20 text-red-400 border border-red-500/50 rounded-xl hover:bg-red-500/40 hover:text-white transition-all active:scale-95">
               Cerrar Sesión
             </button>
           </div>
@@ -1293,13 +1303,13 @@ const resetUsdtPolygonDeposit = () => {
               className="w-full h-auto rounded-lg mb-4"  // Responsive: full width, auto height, with margin below
               priority  // Optional: Prioritize loading if it's critical
             />
-            <h2 className="text-xl font-bold mb-4 text-center">Iniciar Sesión / Registrarse</h2>
+            <h2 className="text-2xl font-bold mb-6 text-center text-white">Iniciar Sesión / Registrarse</h2>
             
             {/* OAuth Buttons */}
-            <button onClick={() => handleOAuthLogin(new GoogleAuthProvider())} className="w-full px-4 py-2 bg-red-500 rounded text-white mb-2">
+            <button onClick={() => handleOAuthLogin(new GoogleAuthProvider())} className="w-full px-4 py-3 bg-surface border border-surface-border hover:bg-white/10 rounded-xl text-white mb-3 flex justify-center items-center gap-2 transition-all active:scale-[0.98]">
               Iniciar con Google
             </button>
-            <button onClick={() => handleOAuthLogin(new TwitterAuthProvider())} className="w-full px-4 py-2 bg-gray-900 rounded text-white mb-2">
+            <button onClick={() => handleOAuthLogin(new TwitterAuthProvider())} className="w-full px-4 py-3 bg-surface border border-surface-border hover:bg-white/10 rounded-xl text-white mb-3 flex justify-center items-center gap-2 transition-all active:scale-[0.98]">
               Iniciar con X
             </button>
             <a 
@@ -1320,11 +1330,11 @@ const resetUsdtPolygonDeposit = () => {
                     value={linkEmail}
                     onChange={(e) => setLinkEmail(e.target.value)}
                     placeholder="Ingresa tu email para el enlace mágico"
-                    className="w-full p-2 bg-gray-600 rounded text-white mb-2"
+                    className="w-full p-3 bg-black/40 border border-surface-border rounded-xl text-white mb-3 focus:ring-2 focus:ring-primary focus:outline-none transition-all"
                   />
                   <button
                     onClick={handleSendEmailLink}
-                    className="w-full px-2 py-2 bg-purple-800 rounded text-white mb-6 text-sm"
+                    className="w-full px-4 py-3 bg-primary hover:bg-primary/80 rounded-xl text-white font-semibold mb-6 shadow-[0_0_15px_rgba(139,92,246,0.5)] transition-all active:scale-[0.98]"
                   >
                     Enviar link de Ingreso
                   </button>
@@ -1360,48 +1370,50 @@ const resetUsdtPolygonDeposit = () => {
                 value={id}
                 onChange={(e) => setId(e.target.value)}
                 placeholder="Ingresa tu ID o cedula"
-                className="w-full p-2 bg-gray-600 rounded text-white border border-gray-500 focus:outline-none focus:border-blue-500"
+                className="w-full p-3 bg-black/40 border border-surface-border rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-primary transition-all"
               />
               <button
                 type="submit"
                 disabled={loading}
-                className="px-4 py-2 bg-green-600 rounded text-white hover:bg-green-700 disabled:bg-gray-500 transition-colors"
+                className="px-6 py-3 bg-primary hover:bg-primary/80 rounded-xl text-white font-semibold disabled:bg-gray-700 transition-all shadow-[0_0_10px_rgba(139,92,246,0.5)] active:scale-[0.98]"
               >
-                {loading ? "Cargando..." : "Obtener Datos"}
+                {loading ? "..." : "Obtener Datos"}
               </button>
             </form>
 
             {error && <p className="text-red-500 mb-4 text-center">{error}</p>}
 
             {data.length > 0 ? (
-              <div>
+              <div className="flex flex-col gap-4 mt-6">
                 {data.map((item, index) => (
-                  <div key={index} className="bg-gray-700 p-4 rounded shadow mb-4">
-                    <h2 className="text-xl font-bold mb-2 text-center">
+                  <div key={index} className="bg-surface border border-surface-border backdrop-blur-md p-6 rounded-2xl shadow-lg transition-transform hover:-translate-y-1">
+                    <h2 className="text-2xl font-bold mb-6 text-center text-white">
                       {item.name} {item.lastname}
                     </h2>
-                    <div className="flex justify-between">
-                      <span className="font-semibold text-gray-300">BTC Balance:</span>
-                      <span className="text-green-400">{item.BTCbalance} BTC</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="font-semibold text-gray-300">Saldo (Pesos):</span>
-                      <span className="text-green-400">{item.COPbalance} COP</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="font-semibold text-gray-300">Rendimiento:</span>
-                      <span className="text-green-400">{item.Rendimiento}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="font-semibold text-gray-300">Precio Promedio Compra:</span>
-                      <span className="text-green-400">{item.AvgCompra}</span>
+                    <div className="space-y-4">
+                      <div className="flex justify-between items-center pb-3 border-b border-surface-border/50">
+                        <span className="font-medium text-gray-400">BTC Balance</span>
+                        <span className="text-xl font-bold text-white tracking-wider">{item.BTCbalance} <span className="text-primary">BTC</span></span>
+                      </div>
+                      <div className="flex justify-between items-center pb-3 border-b border-surface-border/50">
+                        <span className="font-medium text-gray-400">Saldo (Pesos)</span>
+                        <span className="text-xl font-bold text-white">{item.COPbalance} <span className="text-secondary">COP</span></span>
+                      </div>
+                      <div className="flex justify-between items-center pb-3 border-b border-surface-border/50">
+                        <span className="font-medium text-gray-400">Rendimiento</span>
+                        <span className="text-xl font-bold text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.5)]">{item.Rendimiento}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="font-medium text-gray-400">Precio Promedio Compra</span>
+                        <span className="font-mono text-white bg-white/10 px-2 py-1 rounded">{item.AvgCompra}</span>
+                      </div>
                     </div>
                   </div>
                 ))}
                 <button
                   onClick={handleMovementsClick}
                   disabled={loading}
-                  className="w-full mt-4 px-4 py-2 bg-blue-600 rounded text-white hover:bg-blue-700 disabled:bg-gray-500 transition-colors"
+                  className="w-full mt-4 px-4 py-3 bg-secondary hover:bg-secondary/80 rounded-xl text-white font-semibold shadow-[0_0_15px_rgba(59,130,246,0.5)] disabled:bg-gray-700 disabled:shadow-none transition-all active:scale-[0.98]"
                 >
                   {loading ? "Cargando..." : "Mostrar Movimientos"}
                 </button>
