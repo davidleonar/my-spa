@@ -26,6 +26,9 @@ const nextConfig = {
   experimental: {
     // Copy from next.config.ts
   },
+  images: {
+    minimumCacheTTL: 31536000, // 1 year
+  },
   webpack: (config) => {
     // Copy alias from next.config.js
     config.resolve.alias['@react-native-async-storage/async-storage'] = path.join(__dirname, 'src/shims/async-storage.ts');
