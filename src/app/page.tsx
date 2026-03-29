@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import '../app/globals.css';
-import { ArrowsUpDownIcon } from '@heroicons/react/24/outline';
+import { ArrowsUpDownIcon, BellIcon } from '@heroicons/react/24/outline';
 import { QRCodeCanvas } from 'qrcode.react';
 import { auth, database } from '../app/lib/firebase'; // Adjust path
 import { ref, set, push, serverTimestamp, onValue, update } from "firebase/database";
@@ -83,7 +83,20 @@ interface BankWithdrawal {
   country?: string;
   timestamp: number;   // Unix ms
   status?: string;
+  userNotified?: boolean;
   // Add other fields as stored
+}
+
+interface BankDeposit {
+  uid?: string;
+  depositId: string;
+  parsedName: string;
+  amount: string;
+  date: string;
+  time: string;
+  status: string;
+  userNotified?: boolean;
+  adminNotified?: boolean;
 }
 
 export default function Home() {
@@ -197,6 +210,12 @@ export default function Home() {
   const [selectedBankWithdrawal, setSelectedBankWithdrawal] = useState<BankWithdrawal | null>(null);
   const [settleLoading, setSettleLoading] = useState<boolean>(false);
   const [settleError, setSettleError] = useState<string | null>(null);
+
+  // States for Notifications
+  const [adminUnreadCount, setAdminUnreadCount] = useState<number>(0);
+  const [adminUnassignedDeposits, setAdminUnassignedDeposits] = useState<BankDeposit[]>([]);
+  const [userUnreadNotifications, setUserUnreadNotifications] = useState<BankWithdrawal[]>([]);
+  const [userUnreadDeposits, setUserUnreadDeposits] = useState<BankDeposit[]>([]);
 
   // Para el rendering automatico
   useEffect(() => {
@@ -318,38 +337,142 @@ export default function Home() {
   };
 
   useEffect(() => {
-    if (user?.uid !== '5XgksHrgmyeGqqKFYGVjQVM0KGl1') return;
+    if (!user) return; // Exit early if no user is signed in
 
-    const withdrawalsRef = ref(database, 'withdrawals');
-    const unsubscribe = onValue(withdrawalsRef, (snapshot) => {
-      //console.log('Snapshot received:', snapshot.exists() ? 'Data present' : 'No data');
-      const filtered: BankWithdrawal[] = [];
-      snapshot.forEach((userSnap) => {
-        //console.log(`User: ${userSnap.key}`);
-        userSnap.forEach((reqSnap) => {
+    if (user.uid === '5XgksHrgmyeGqqKFYGVjQVM0KGl1') {
+      // Admin Listener: Listen to all withdrawals
+      const withdrawalsRef = ref(database, 'withdrawals');
+      const unsubscribeW = onValue(withdrawalsRef, (snapshot) => {
+        const filtered: BankWithdrawal[] = [];
+        snapshot.forEach((userSnap) => {
+          userSnap.forEach((reqSnap) => {
+            const data = reqSnap.val();
+            if (data.status === 'pending') {
+              if (data.option === 'bancosColombia' || data.option === 'bancosInternacionales') {
+                filtered.push({
+                  uid: userSnap.key!,
+                  requestId: reqSnap.key!,
+                  ...data,
+                });
+              }
+            }
+          });
+        });
+        setPendingBankWithdrawals(filtered);
+        setAdminUnreadCount(filtered.length);
+      }, (error) => console.error('onValue error:', error));
+
+      const unassignedRef = ref(database, 'unassignedDeposits');
+      const unsubscribeD = onValue(unassignedRef, (snapshot) => {
+        const unassigned: BankDeposit[] = [];
+        snapshot.forEach((reqSnap) => {
           const data = reqSnap.val();
-          //console.log(`Request: ${reqSnap.key}, Data:`, data);  // Log full entry
-          if (data.status === 'pending' &&
-            (data.option === 'bancosColombia' || data.option === 'bancosInternacionales')) {
-            //console.log('Matched:', data);
-            filtered.push({
-              uid: userSnap.key!,
+          if (!data.adminNotified) {
+            unassigned.push({ depositId: reqSnap.key!, ...data });
+          }
+        });
+        setAdminUnassignedDeposits(unassigned);
+      });
+
+      return () => {
+        unsubscribeW();
+        unsubscribeD();
+      };
+    } else {
+      // Regular User Listener: Listen to their own withdrawals and deposits
+      const userWithdrawalsRef = ref(database, `withdrawals/${user.uid}`);
+      const unsubscribeW = onValue(userWithdrawalsRef, (snapshot) => {
+        const notifications: BankWithdrawal[] = [];
+        snapshot.forEach((reqSnap) => {
+          const data = reqSnap.val();
+          if (data.status === 'settled' && !data.userNotified) {
+            notifications.push({
+              uid: user.uid,
               requestId: reqSnap.key!,
               ...data,
             });
-          } else {
-            // Why rejected? console.log('Filtered out:', data);  
           }
         });
-      });
-      //console.log('Filtered array:', filtered);
-      setPendingBankWithdrawals(filtered);
-    }, (error) => {
-      console.error('onValue error:', error);  // Catch listener errors
-    });
+        setUserUnreadNotifications(notifications);
+      }, (error) => console.error('onValue error:', error));
 
-    return () => unsubscribe();
+      const userDepositsRef = ref(database, `deposits/${user.uid}`);
+      const unsubscribeD = onValue(userDepositsRef, (snapshot) => {
+        const depositNotifs: BankDeposit[] = [];
+        snapshot.forEach((reqSnap) => {
+          const data = reqSnap.val();
+          if (!data.userNotified) {
+            depositNotifs.push({
+              uid: user.uid,
+              depositId: reqSnap.key!,
+              ...data,
+            });
+          }
+        });
+        setUserUnreadDeposits(depositNotifs);
+      });
+
+      return () => {
+        unsubscribeW();
+        unsubscribeD();
+      };
+    }
   }, [user]);
+
+  const handleAdminBellClick = async () => {
+    // Reveal the Pending Withdrawals panel
+    if (!showPendingWithdrawals) {
+      setShowPendingWithdrawals(true);
+    }
+    
+    // Clear unassigned deposits notifications
+    if (adminUnassignedDeposits.length > 0) {
+      try {
+        const updates: { [key: string]: boolean } = {};
+        adminUnassignedDeposits.forEach((dep) => {
+          updates[`unassignedDeposits/${dep.depositId}/adminNotified`] = true;
+        });
+        await update(ref(database), updates);
+        alert(`Tienes ${adminUnassignedDeposits.length} deposito(s) sin asignar a usuarios! Por favor revisa la base de datos.`);
+        setAdminUnassignedDeposits([]);
+      } catch (e) {
+        console.error('Failed to acknowledge admin deposits notifications', e);
+      }
+    }
+  };
+
+  const handleUserBellClick = async () => {
+    if ((userUnreadNotifications.length === 0 && userUnreadDeposits.length === 0) || !user) return;
+
+    // Mark them as notified
+    try {
+      const updates: { [key: string]: boolean } = {};
+      
+      let message = "";
+      if (userUnreadNotifications.length > 0) {
+        userUnreadNotifications.forEach((wd) => {
+          updates[`withdrawals/${wd.uid}/${wd.requestId}/userNotified`] = true;
+        });
+        message += `Tienes ${userUnreadNotifications.length} retiro(s) liquidados! `;
+      }
+      
+      if (userUnreadDeposits.length > 0) {
+        userUnreadDeposits.forEach((dep) => {
+          updates[`deposits/${dep.uid}/${dep.depositId}/userNotified`] = true;
+        });
+        message += `Tienes ${userUnreadDeposits.length} deposito(s) recibidos por email! `;
+      }
+
+      await update(ref(database), updates);
+      alert(message + "Revisa tus movimientos.");
+      
+      // Clear local state immediately for UX
+      setUserUnreadNotifications([]);
+      setUserUnreadDeposits([]);
+    } catch (e) {
+      console.error('Failed to acknowledge user notifications', e);
+    }
+  };
 
   // Usage examples:
 
@@ -1292,7 +1415,32 @@ export default function Home() {
           </div>
         ) : user ? (
           <div className="text-center mb-6 pb-6 border-b border-surface-border">
-            <p className="text-lg font-medium text-gray-200 mb-4">Bienvenido, <span className="text-white font-bold">{user.displayName || user.email}</span></p>
+            <div className="flex justify-center items-center gap-4 mb-4">
+              <p className="text-lg font-medium text-gray-200">Bienvenido, <span className="text-white font-bold">{user.displayName || user.email}</span></p>
+
+              {user.uid === '5XgksHrgmyeGqqKFYGVjQVM0KGl1' ? (
+                // Admin Bell
+                <button onClick={handleAdminBellClick} className="relative p-2 bg-white/5 hover:bg-white/10 rounded-full transition-colors active:scale-95 text-gray-300 hover:text-white border border-surface-border">
+                  <BellIcon className="w-6 h-6" />
+                  {(adminUnreadCount > 0 || adminUnassignedDeposits.length > 0) && (
+                    <span className="absolute top-0 right-0 transform translate-x-1/4 -translate-y-1/4 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white shadow-lg ring-2 ring-surface">
+                      {adminUnreadCount + adminUnassignedDeposits.length}
+                    </span>
+                  )}
+                </button>
+              ) : (
+                // User Bell
+                <button onClick={handleUserBellClick} className="relative p-2 bg-white/5 hover:bg-white/10 rounded-full transition-colors active:scale-95 text-gray-300 hover:text-white border border-surface-border">
+                  <BellIcon className="w-6 h-6" />
+                  {(userUnreadNotifications.length > 0 || userUnreadDeposits.length > 0) && (
+                    <span className="absolute top-0 right-0 transform translate-x-1/4 -translate-y-1/4 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white shadow-lg ring-2 ring-surface">
+                      {userUnreadNotifications.length + userUnreadDeposits.length}
+                    </span>
+                  )}
+                </button>
+              )}
+            </div>
+
             <button onClick={handleSignOut} className="px-5 py-2 bg-red-500/20 text-red-400 border border-red-500/50 rounded-xl hover:bg-red-500/40 hover:text-white transition-all active:scale-95">
               Cerrar Sesión
             </button>
@@ -1511,9 +1659,15 @@ export default function Home() {
                     Bancos Colombia
                   </button>
                   {savingsOption === 'bancosColombia' && (
-                    <div className="mt-4 text-center p-4 bg-gray-800 rounded">
-                      <p className="text-lg">@3014375496</p>
-                      <p className="text-xs mt-2">Usa esta llave para realizar transferencias desde cualquier banco en Colombia. La cantidad no debe ser superior a 1.000.000 Pesos, una vez realizada la transferencia, enviar el comprobante haciendo click en &apos;Contacto&apos;. si requieres cantidades mayores, hacer click primero en &apos;Contacto&apos;</p>
+                    <div className="mt-4 text-center p-4 bg-gray-800 rounded flex flex-col items-center">
+                      <Image
+                        src="/QR_rendimientos.jpg"
+                        alt="QR Bancos Colombia"
+                        width={200}
+                        height={200}
+                        className="rounded-lg mb-4 shadow-[0_0_15px_rgba(255,255,255,0.1)]"
+                      />
+                      <p className="text-xs mt-2 text-gray-300">Usa este QR para realizar transferencias desde cualquier banco en Colombia. Una vez realizada la transferencia, enviar el comprobante haciendo click en &apos;Contacto&apos;. si requieres cantidades mayores, hacer click primero en &apos;Contacto&apos;</p>
                     </div>
                   )}
 
