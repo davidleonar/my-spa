@@ -1685,11 +1685,11 @@ export default function Home() {
                           className="ml-4 p-2 bg-blue-500/20 hover:bg-blue-500/40 text-blue-400 rounded-lg transition-all active:scale-95"
                           title="Copiar número de cuenta"
                         >
-                          <DocumentDuplicateIcon className="w-5 h-5"/>
+                          <DocumentDuplicateIcon className="w-5 h-5" />
                         </button>
                         {copiedBancos && <span className="ml-3 text-sm text-green-400 font-medium">¡Copiado!</span>}
                       </div>
-                      <p className="text-xs mt-2 text-gray-300">Usa este QR para realizar transferencias desde cualquier banco en Colombia. Una vez realizada la transferencia, enviar el comprobante haciendo click en &apos;Contacto&apos;. si requieres cantidades mayores, hacer click primero en &apos;Contacto&apos;</p>
+                      <p className="text-xs mt-2 text-gray-300">Escanea este codigo QR o copia esta llave para realizar transferencias desde cualquier banco en Colombia. Una vez realizada la transferencia, enviar el comprobante haciendo click en &apos;Contacto&apos;. si requieres cantidades mayores, hacer click primero en &apos;Contacto&apos;</p>
                     </div>
                   )}
 
@@ -2302,8 +2302,8 @@ export default function Home() {
           <div className="bg-surface border border-surface-border p-6 rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-bold text-white">Notificaciones Históricas</h2>
-              <button 
-                onClick={() => setShowNotificationsModal(false)} 
+              <button
+                onClick={() => setShowNotificationsModal(false)}
                 className="text-gray-400 hover:text-white font-bold text-2xl"
               >
                 &times;
