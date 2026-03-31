@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import '../app/globals.css';
-import { ArrowsUpDownIcon, BellIcon } from '@heroicons/react/24/outline';
+import { ArrowsUpDownIcon, BellIcon, DocumentDuplicateIcon } from '@heroicons/react/24/outline';
 import { QRCodeCanvas } from 'qrcode.react';
 import { auth, database } from '../app/lib/firebase'; // Adjust path
 import { ref, set, push, serverTimestamp, onValue, update } from "firebase/database";
@@ -95,6 +95,7 @@ interface BankDeposit {
   date: string;
   time: string;
   status: string;
+  timestamp?: number;
   userNotified?: boolean;
   adminNotified?: boolean;
 }
@@ -129,6 +130,7 @@ export default function Home() {
   const [copyButtonText, setCopyButtonText] = useState<string>("Copy Payment Request");
   const [copySavingsButtonText, setCopySavingsButtonText] = useState<string>("Copy Payment Request");
   const [copySavingsButtonTextusdt, setCopySavingsButtonTextusdt] = useState<string>("Copy USDT Polygon Address");
+  const [copiedBancos, setCopiedBancos] = useState<boolean>(false);
 
   // States for savings
   const [showSavings, setShowSavings] = useState<boolean>(false);
@@ -199,11 +201,6 @@ export default function Home() {
   const [tapdMessage, setTapdMessage] = useState<string | null>(null);
   const [tapdPath, setTapdPath] = useState<string>('v1/getinfo');
 
-  // States for sync
-  const [syncLoading, setSyncLoading] = useState<boolean>(false);
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
-  const [syncError, setSyncError] = useState<string | null>(null);
-
   // States for bank wwithdrawals
   const [showPendingWithdrawals, setShowPendingWithdrawals] = useState<boolean>(false);
   const [pendingBankWithdrawals, setPendingBankWithdrawals] = useState<BankWithdrawal[]>([]);
@@ -216,6 +213,12 @@ export default function Home() {
   const [adminUnassignedDeposits, setAdminUnassignedDeposits] = useState<BankDeposit[]>([]);
   const [userUnreadNotifications, setUserUnreadNotifications] = useState<BankWithdrawal[]>([]);
   const [userUnreadDeposits, setUserUnreadDeposits] = useState<BankDeposit[]>([]);
+
+  // New States for Notification Modal
+  const [showNotificationsModal, setShowNotificationsModal] = useState<boolean>(false);
+  const [allUserWithdrawals, setAllUserWithdrawals] = useState<BankWithdrawal[]>([]);
+  const [allUserDeposits, setAllUserDeposits] = useState<BankDeposit[]>([]);
+  const [allAdminDeposits, setAllAdminDeposits] = useState<BankDeposit[]>([]);
 
   // Para el rendering automatico
   useEffect(() => {
@@ -365,13 +368,17 @@ export default function Home() {
       const unassignedRef = ref(database, 'unassignedDeposits');
       const unsubscribeD = onValue(unassignedRef, (snapshot) => {
         const unassigned: BankDeposit[] = [];
+        const allAdmin: BankDeposit[] = [];
         snapshot.forEach((reqSnap) => {
           const data = reqSnap.val();
+          const dep = { depositId: reqSnap.key!, ...data };
+          allAdmin.push(dep);
           if (!data.adminNotified) {
-            unassigned.push({ depositId: reqSnap.key!, ...data });
+            unassigned.push(dep);
           }
         });
         setAdminUnassignedDeposits(unassigned);
+        setAllAdminDeposits(allAdmin.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)));
       });
 
       return () => {
@@ -382,34 +389,44 @@ export default function Home() {
       // Regular User Listener: Listen to their own withdrawals and deposits
       const userWithdrawalsRef = ref(database, `withdrawals/${user.uid}`);
       const unsubscribeW = onValue(userWithdrawalsRef, (snapshot) => {
-        const notifications: BankWithdrawal[] = [];
+        const unreadNotifications: BankWithdrawal[] = [];
+        const allW: BankWithdrawal[] = [];
         snapshot.forEach((reqSnap) => {
           const data = reqSnap.val();
-          if (data.status === 'settled' && !data.userNotified) {
-            notifications.push({
+          if (data.status === 'settled') {
+            const wd = {
               uid: user.uid,
               requestId: reqSnap.key!,
               ...data,
-            });
+            };
+            allW.push(wd);
+            if (!data.userNotified) {
+              unreadNotifications.push(wd);
+            }
           }
         });
-        setUserUnreadNotifications(notifications);
+        setUserUnreadNotifications(unreadNotifications);
+        setAllUserWithdrawals(allW.sort((a, b) => b.timestamp - a.timestamp));
       }, (error) => console.error('onValue error:', error));
 
       const userDepositsRef = ref(database, `deposits/${user.uid}`);
       const unsubscribeD = onValue(userDepositsRef, (snapshot) => {
         const depositNotifs: BankDeposit[] = [];
+        const allD: BankDeposit[] = [];
         snapshot.forEach((reqSnap) => {
           const data = reqSnap.val();
+          const dep = {
+            uid: user.uid,
+            depositId: reqSnap.key!,
+            ...data,
+          };
+          allD.push(dep);
           if (!data.userNotified) {
-            depositNotifs.push({
-              uid: user.uid,
-              depositId: reqSnap.key!,
-              ...data,
-            });
+            depositNotifs.push(dep);
           }
         });
         setUserUnreadDeposits(depositNotifs);
+        setAllUserDeposits(allD.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)));
       });
 
       return () => {
@@ -420,11 +437,7 @@ export default function Home() {
   }, [user]);
 
   const handleAdminBellClick = async () => {
-    // Reveal the Pending Withdrawals panel
-    if (!showPendingWithdrawals) {
-      setShowPendingWithdrawals(true);
-    }
-    
+    setShowNotificationsModal(true);
     // Clear unassigned deposits notifications
     if (adminUnassignedDeposits.length > 0) {
       try {
@@ -433,7 +446,6 @@ export default function Home() {
           updates[`unassignedDeposits/${dep.depositId}/adminNotified`] = true;
         });
         await update(ref(database), updates);
-        alert(`Tienes ${adminUnassignedDeposits.length} deposito(s) sin asignar a usuarios! Por favor revisa la base de datos.`);
         setAdminUnassignedDeposits([]);
       } catch (e) {
         console.error('Failed to acknowledge admin deposits notifications', e);
@@ -442,30 +454,27 @@ export default function Home() {
   };
 
   const handleUserBellClick = async () => {
+    setShowNotificationsModal(true);
     if ((userUnreadNotifications.length === 0 && userUnreadDeposits.length === 0) || !user) return;
 
     // Mark them as notified
     try {
       const updates: { [key: string]: boolean } = {};
-      
-      let message = "";
+
       if (userUnreadNotifications.length > 0) {
         userUnreadNotifications.forEach((wd) => {
           updates[`withdrawals/${wd.uid}/${wd.requestId}/userNotified`] = true;
         });
-        message += `Tienes ${userUnreadNotifications.length} retiro(s) liquidados! `;
       }
-      
+
       if (userUnreadDeposits.length > 0) {
         userUnreadDeposits.forEach((dep) => {
           updates[`deposits/${dep.uid}/${dep.depositId}/userNotified`] = true;
         });
-        message += `Tienes ${userUnreadDeposits.length} deposito(s) recibidos por email! `;
       }
 
       await update(ref(database), updates);
-      alert(message + "Revisa tus movimientos.");
-      
+
       // Clear local state immediately for UX
       setUserUnreadNotifications([]);
       setUserUnreadDeposits([]);
@@ -1009,7 +1018,7 @@ export default function Home() {
       await set(newRef, withdrawalData);
 
       // UX Feedback (teaching: Use libraries like react-toastify for better modals)
-      alert('Withdrawal request submitted successfully. The admin has been notified via email.');
+      alert('Solicitud de retiro enviado correctamente, la Admin ha sido notificada.');
       setWithdrawalError(null);  // Clear errors
 
       // Reset form (teaching: Prevent resubmits; use useState setters)
@@ -1296,12 +1305,8 @@ export default function Home() {
   // Handle loading state
   //---------------------------------------------------------------- */
 
-  const handleSync = async () => {
+  const handleSync = useCallback(async () => {
     if (!user) return; // Safety check, though admin section already gates this
-
-    setSyncLoading(true);
-    setSyncMessage(null);
-    setSyncError(null);
 
     try {
       const idToken = await user.getIdToken(); // Get Firebase ID token for auth
@@ -1318,17 +1323,17 @@ export default function Home() {
         throw new Error(errorData.error || 'Sync failed');
       }
 
-      const data = await response.json();
-      setSyncMessage(data.message || 'Sync completed successfully');
-
     } catch (err: unknown) {
-      const error = err as Error;
-      setSyncError(error.message || 'An error occurred during sync');
       console.error('Sync error:', err);
-    } finally {
-      setSyncLoading(false);
     }
-  };
+  }, [user]);
+
+  // Sync right after login
+  useEffect(() => {
+    if (user?.uid) {
+      handleSync();
+    }
+  }, [user?.uid, handleSync]);
 
   //---------------------------------------------------------------- */
   // Handle bank Settlement state
@@ -1667,6 +1672,23 @@ export default function Home() {
                         height={200}
                         className="rounded-lg mb-4 shadow-[0_0_15px_rgba(255,255,255,0.1)]"
                       />
+                      <div className="flex justify-center items-center mb-4 bg-white/5 border border-surface-border rounded-xl px-4 py-2 shadow-sm transition-all hover:bg-white/10">
+                        <span className="text-lg font-medium font-mono text-gray-200 tracking-wider">0092325247</span>
+                        <button
+                          onClick={() => {
+                            if (navigator.clipboard && navigator.clipboard.writeText) {
+                              navigator.clipboard.writeText("0092325247");
+                              setCopiedBancos(true);
+                              setTimeout(() => setCopiedBancos(false), 2000);
+                            }
+                          }}
+                          className="ml-4 p-2 bg-blue-500/20 hover:bg-blue-500/40 text-blue-400 rounded-lg transition-all active:scale-95"
+                          title="Copiar número de cuenta"
+                        >
+                          <DocumentDuplicateIcon className="w-5 h-5"/>
+                        </button>
+                        {copiedBancos && <span className="ml-3 text-sm text-green-400 font-medium">¡Copiado!</span>}
+                      </div>
                       <p className="text-xs mt-2 text-gray-300">Usa este QR para realizar transferencias desde cualquier banco en Colombia. Una vez realizada la transferencia, enviar el comprobante haciendo click en &apos;Contacto&apos;. si requieres cantidades mayores, hacer click primero en &apos;Contacto&apos;</p>
                     </div>
                   )}
@@ -2258,15 +2280,7 @@ export default function Home() {
             {tapdError && <p className="text-red-400 mt-2">{tapdError}</p>}
             {tapdMessage && <p className="text-green-400 mt-2">{tapdMessage}</p>}
 
-            <button
-              onClick={handleSync}
-              disabled={syncLoading}
-              className="w-full mt-4 bg-purple-600 hover:bg-purple-700 py-2 rounded disabled:bg-gray-500"
-            >
-              {syncLoading ? 'Syncing...' : 'Sync with RTDB'}
-            </button>
-            {syncError && <p className="text-red-400 mt-2">{syncError}</p>}
-            {syncMessage && <p className="text-green-400 mt-2">{syncMessage}</p>}
+
             <h3 className="font-bold text-blue-400">{burnAsset}, {burnAmount}, {burnUserId}, {transferAsset}, {transferAmount}, {transferFromUserId}, {transferToUserId}</h3>
 
           </div>
@@ -2282,6 +2296,58 @@ export default function Home() {
         </button>
 
       </div>
+
+      {showNotificationsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-surface border border-surface-border p-6 rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-white">Notificaciones Históricas</h2>
+              <button 
+                onClick={() => setShowNotificationsModal(false)} 
+                className="text-gray-400 hover:text-white font-bold text-2xl"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="overflow-y-auto pr-2 space-y-4 flex-1">
+              {user?.uid === '5XgksHrgmyeGqqKFYGVjQVM0KGl1' ? (
+                // Admin View
+                allAdminDeposits.length > 0 ? allAdminDeposits.map((dep, idx) => (
+                  <div key={idx} className="bg-white/5 p-4 rounded-xl border border-white/10">
+                    <p className="text-sm text-gray-400 mb-1">{new Date(dep.timestamp || 0).toLocaleString()}</p>
+                    <p className="text-white font-medium">Deposito de {dep.parsedName}</p>
+                    <p className="text-green-400 font-bold">${dep.amount} <span className="text-xs text-gray-500">[{dep.status}]</span></p>
+                  </div>
+                )) : <p className="text-gray-400 text-center py-4">No hay notificaciones históricas.</p>
+              ) : (
+                // User View
+                [...allUserDeposits, ...allUserWithdrawals]
+                  .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+                  .map((item, idx) => (
+                    <div key={idx} className="bg-white/5 p-4 rounded-xl border border-white/10">
+                      <p className="text-sm text-gray-400 mb-1">{new Date(item.timestamp || 0).toLocaleString()}</p>
+                      {'parsedName' in item ? (
+                        <>
+                          <p className="text-white font-medium">Deposito Recibido</p>
+                          <p className="text-green-400 font-bold">${item.amount} <span className="text-xs text-gray-500">[{item.status}]</span></p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-white font-medium">Retiro a {item.bankName || 'Bitcoin'}</p>
+                          <p className="text-red-400 font-bold">${item.amount} <span className="text-xs text-gray-500">[{item.status}]</span></p>
+                        </>
+                      )}
+                    </div>
+                  ))
+              )}
+              {user?.uid !== '5XgksHrgmyeGqqKFYGVjQVM0KGl1' && [...allUserDeposits, ...allUserWithdrawals].length === 0 && (
+                <p className="text-gray-400 text-center py-4">No hay notificaciones históricas.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
