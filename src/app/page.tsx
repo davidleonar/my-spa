@@ -104,6 +104,7 @@ export default function Home() {
   const [id, setId] = useState<string>("");
   const [data, setData] = useState<SpreadsheetRow[]>([]);
   const [movements, setMovements] = useState<MovementRow[]>([]);
+  const [cryptoBalance, setCryptoBalance] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   // State for BTC/USD price tracking
@@ -429,9 +430,19 @@ export default function Home() {
         setAllUserDeposits(allD.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)));
       });
 
+      const cryptoBalanceRef = ref(database, `cryptoBalances/${user.uid}`);
+      const unsubscribeC = onValue(cryptoBalanceRef, (snapshot) => {
+        if (snapshot.exists()) {
+          setCryptoBalance(snapshot.val().balance || 0);
+        } else {
+          setCryptoBalance(0);
+        }
+      });
+
       return () => {
         unsubscribeW();
         unsubscribeD();
+        unsubscribeC();
       };
     }
   }, [user]);
@@ -1520,7 +1531,17 @@ export default function Home() {
 
         {user && (
           <>
-            <h1 className="text-2xl font-bold mb-4 text-center">Saldos de Cuenta</h1>
+            <div className="bg-surface border border-surface-border backdrop-blur-md p-6 rounded-2xl shadow-lg mb-8 transition-transform hover:-translate-y-1">
+              <h2 className="text-2xl font-bold mb-4 text-center text-white">Crypto Wallet</h2>
+              <div className="flex justify-between items-center pb-3">
+                <span className="font-medium text-gray-400">Total BTC Balance</span>
+                <span className="text-3xl font-bold text-white tracking-wider">
+                  {cryptoBalance > 0 ? cryptoBalance.toFixed(8) : "0.00000000"} <span className="text-primary">BTC</span>
+                </span>
+              </div>
+            </div>
+
+            <h1 className="text-2xl font-bold mb-4 text-center">Saldos de Inversión</h1>
             <form onSubmit={handleSubmit} className="flex items-center space-x-2 mb-4">
               <input
                 type="text"
