@@ -98,6 +98,13 @@ interface BankDeposit {
   timestamp?: number;
   userNotified?: boolean;
   adminNotified?: boolean;
+  marketBuy?: {
+    btcBought: number;
+    usdtSpent: number;
+    orderId: number;
+    usdtCopPrice?: number;
+    btcUsdtPrice?: number;
+  };
 }
 
 export default function Home() {
@@ -2338,6 +2345,13 @@ export default function Home() {
                     <p className="text-sm text-gray-400 mb-1">{new Date(dep.timestamp || 0).toLocaleString()}</p>
                     <p className="text-white font-medium">Deposito de {dep.parsedName}</p>
                     <p className="text-green-400 font-bold">${dep.amount} <span className="text-xs text-gray-500">[{dep.status}]</span></p>
+                    {dep.marketBuy && (
+                      <div className="mt-2 text-xs bg-black/20 p-2 rounded">
+                        <p className="text-gray-300">Market Buy: {dep.marketBuy.btcBought} BTC</p>
+                        {dep.marketBuy.btcUsdtPrice && <p className="text-gray-400">BTC/USDT: ${dep.marketBuy.btcUsdtPrice}</p>}
+                        {dep.marketBuy.usdtCopPrice && <p className="text-gray-400">USDT/COP: ${dep.marketBuy.usdtCopPrice}</p>}
+                      </div>
+                    )}
                   </div>
                 )) : <p className="text-gray-400 text-center py-4">No hay notificaciones históricas.</p>
               ) : (
@@ -2351,6 +2365,13 @@ export default function Home() {
                         <>
                           <p className="text-white font-medium">Deposito Recibido</p>
                           <p className="text-green-400 font-bold">${item.amount} <span className="text-xs text-gray-500">[{item.status}]</span></p>
+                          {'marketBuy' in item && item.marketBuy && (
+                            <div className="mt-2 text-xs bg-black/20 p-2 rounded">
+                              <p className="text-gray-300">Market Buy: {item.marketBuy.btcBought} BTC</p>
+                              {item.marketBuy.btcUsdtPrice && <p className="text-gray-400">BTC/USDT: ${item.marketBuy.btcUsdtPrice}</p>}
+                              {item.marketBuy.usdtCopPrice && <p className="text-gray-400">USDT/COP: ${item.marketBuy.usdtCopPrice}</p>}
+                            </div>
+                          )}
                         </>
                       ) : (
                         <>
