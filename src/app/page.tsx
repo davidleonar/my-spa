@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import '../app/globals.css';
 import { ArrowsUpDownIcon, BellIcon, DocumentDuplicateIcon } from '@heroicons/react/24/outline';
 import { QRCodeCanvas } from 'qrcode.react';
@@ -112,6 +112,7 @@ export default function Home() {
   const [data, setData] = useState<SpreadsheetRow[]>([]);
   const [movements, setMovements] = useState<MovementRow[]>([]);
   const [cryptoBalance, setCryptoBalance] = useState<number>(0);
+  const [syncBtcBalance, setSyncBtcBalance] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   // State for BTC/USD price tracking
@@ -446,10 +447,27 @@ export default function Home() {
         }
       });
 
+      const balancesRef = ref(database, `balances/${user.uid}`);
+      const unsubscribeB = onValue(balancesRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const userBalance = snapshot.val();
+          const btcProp = userBalance.BTCBalance ?? userBalance.BTCbalance ?? userBalance.btcBalance;
+          if (btcProp) {
+            const btcStr = btcProp.toString().replace(',', '.');
+            setSyncBtcBalance(parseFloat(btcStr) || 0);
+          } else {
+            setSyncBtcBalance(0);
+          }
+        } else {
+          setSyncBtcBalance(0);
+        }
+      });
+
       return () => {
         unsubscribeW();
         unsubscribeD();
         unsubscribeC();
+        unsubscribeB();
       };
     }
   }, [user]);
@@ -513,28 +531,37 @@ export default function Home() {
     window.location.reload();
   };
 
-  // Fetch BTC/USD price from CoinGecko API every 60 seconds
+  // Fetch BTC/USD price using Binance WebSockets
+  const currentPriceRef = useRef<number | null>(null);
+
   useEffect(() => {
-    const fetchPrice = async () => {
+    const ws = new WebSocket('wss://stream.binance.com:9443/ws/btcusdt@ticker');
+
+    ws.onmessage = (event) => {
       try {
-        const response = await fetch(
-          'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd'
-        );
-        if (!response.ok) throw new Error('Failed to fetch price');
-        const data = await response.json();
-        const newPrice = data.bitcoin.usd;
-        setPrevPrice(currentPrice); // Store previous price before updating
-        setCurrentPrice(newPrice);
+        const data = JSON.parse(event.data);
+        const newPrice = parseFloat(data.c);
+        
+        if (currentPriceRef.current !== newPrice) {
+          if (currentPriceRef.current !== null) {
+            setPrevPrice(currentPriceRef.current);
+          }
+          setCurrentPrice(newPrice);
+          currentPriceRef.current = newPrice;
+        }
       } catch (err) {
-        console.error('Error fetching BTC price:', err);
+        console.error('Error parsing Binance websocket data:', err);
       }
     };
 
-    fetchPrice(); // Initial fetch
-    const interval = setInterval(fetchPrice, 600000); // Fetch every 60 seconds
+    ws.onerror = (error) => {
+      console.error('Binance WebSocket error:', error);
+    };
 
-    return () => clearInterval(interval); // Cleanup on unmount
-  }, [currentPrice]);
+    return () => {
+      ws.close();
+    };
+  }, []);
 
   // Determine text color based on price change
   const getColorClass = () => {
@@ -608,7 +635,25 @@ export default function Home() {
       }
       const result = await response.json();
       console.log("Successfully fetched data:", result);
-      setMovements(result.data);
+      
+      const mappedDeposits: MovementRow[] = allUserDeposits.map((dep) => {
+        const d = new Date(dep.timestamp || Date.now());
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const formattedDate = `${String(d.getDate()).padStart(2, '0')}-${months[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
+        
+        return {
+          id: String(dep.uid || user?.uid || '0'),
+          Fecha: formattedDate,
+          'Saldo COP': dep.amount?.toString() || '0',
+          'Precio BTC': dep.marketBuy?.btcUsdtPrice?.toString() || '0',
+          'Precio Dolar': dep.marketBuy?.usdtCopPrice?.toString() || '0',
+          Total: dep.marketBuy?.btcBought?.toString() || '0',
+          Operacion: 'Compra',
+        };
+      });
+
+      const combined = [...result.data, ...mappedDeposits];
+      setMovements(combined);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch movements");
     } finally {
@@ -1539,11 +1584,11 @@ export default function Home() {
         {user && (
           <>
             <div className="bg-surface border border-surface-border backdrop-blur-md p-6 rounded-2xl shadow-lg mb-8 transition-transform hover:-translate-y-1">
-              <h2 className="text-2xl font-bold mb-4 text-center text-white">Crypto Wallet</h2>
+              <h2 className="text-2xl font-bold mb-4 text-center text-white">BTC Wallet</h2>
               <div className="flex justify-between items-center pb-3">
                 <span className="font-medium text-gray-400">Total BTC Balance</span>
                 <span className="text-3xl font-bold text-white tracking-wider">
-                  {cryptoBalance > 0 ? cryptoBalance.toFixed(8) : "0.00000000"} <span className="text-primary">BTC</span>
+                  {(cryptoBalance + syncBtcBalance) > 0 ? (cryptoBalance + syncBtcBalance).toFixed(8) : "0.00000000"} <span className="text-primary">BTC</span>
                 </span>
               </div>
             </div>
