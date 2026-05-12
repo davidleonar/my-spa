@@ -10,7 +10,7 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "Rendimientos App",
   description: "Ahorra BTC de manera soberana",
-  icons: "/favicon.ico",
+  icons: "/pig-180-nobg.png",
   openGraph: {
     title: 'Rendimientos App',
     description: 'Ahorra BTC de manera soberana',
@@ -18,9 +18,9 @@ export const metadata: Metadata = {
     siteName: 'Rendimientos App',
     images: [
       {
-        url: 'https://rendimientos.net/AppIcon.appiconset/216.png', // Absolute for crawlers
-        width: 1024,
-        height: 1024,
+        url: 'https://rendimientos.net/apple-touch-icon.png', // Absolute for crawlers
+        width: 180,
+        height: 180,
       },
     ],
     type: 'website',
@@ -29,7 +29,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'Rendimientos App',
     description: 'Ahorra BTC de manera soberana',
-    images: ['https://rendimientos.net/AppIcon.appiconset/216.png'],
+    images: ['https://rendimientos.net/apple-touch-icon.png'],
   },
 
 };

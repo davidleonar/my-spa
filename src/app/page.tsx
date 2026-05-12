@@ -4,7 +4,7 @@ import '../app/globals.css';
 import { ArrowsUpDownIcon, BellIcon, DocumentDuplicateIcon } from '@heroicons/react/24/outline';
 import { QRCodeCanvas } from 'qrcode.react';
 import { auth, database } from '../app/lib/firebase'; // Adjust path
-import { ref, set, push, serverTimestamp, onValue, update } from "firebase/database";
+import { ref, set, push, serverTimestamp, onValue, update, get } from "firebase/database";
 import {
   GoogleAuthProvider,
   signInWithPopup,
@@ -76,7 +76,11 @@ interface BankWithdrawal {
   requestId: string;
   userEmail?: string;  // Or 'email'
   amount: number;      // COP for banks
-  option: 'bancosColombia' | 'bancosInternacionales';
+  requestedBtcAmount?: number; // Store for copRetiros
+  fee?: number;
+  totalBtcToDeduct?: number;
+  bankData?: string;
+  option: 'bancosColombia' | 'bancosInternacionales' | 'btcLightning' | 'usdtWallet' | 'copRetiros';
   name?: string;
   bank?: string;
   bankName?: string;
@@ -118,6 +122,7 @@ export default function Home() {
   // State for BTC/USD price tracking
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
   const [prevPrice, setPrevPrice] = useState<number | null>(null);
+  const [currentUsdtCop, setCurrentUsdtCop] = useState<number | null>(null);
   // State for sort order in movements
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   // State to toggle email form
@@ -174,6 +179,15 @@ export default function Home() {
   const [isClient, setIsClient] = useState(false);
 
   const [withdrawalError, setWithdrawalError] = useState<string | null>(null);  // Add for UX feedback
+
+  // States for COP Retiros
+  const [showCopRetiros, setShowCopRetiros] = useState<boolean>(false);
+  const [copRetirosAmount, setCopRetirosAmount] = useState<string>('');
+  const [copRetirosBtcAmount, setCopRetirosBtcAmount] = useState<string>('');
+  const [copRetirosBreBKey, setCopRetirosBreBKey] = useState<string>('');
+  const [liveBtcUsdt, setLiveBtcUsdt] = useState<number | null>(null);
+  const [liveUsdtCop, setLiveUsdtCop] = useState<number | null>(null);
+  const [copRetirosError, setCopRetirosError] = useState<string | null>(null);
 
   //States para login
   const [user, loadingAuth, errorAuth] = useAuthState(auth);
@@ -360,7 +374,7 @@ export default function Home() {
           userSnap.forEach((reqSnap) => {
             const data = reqSnap.val();
             if (data.status === 'pending') {
-              if (data.option === 'bancosColombia' || data.option === 'bancosInternacionales') {
+              if (data.option === 'bancosColombia' || data.option === 'bancosInternacionales' || data.option === 'copRetiros') {
                 filtered.push({
                   uid: userSnap.key!,
                   requestId: reqSnap.key!,
@@ -531,17 +545,48 @@ export default function Home() {
     window.location.reload();
   };
 
+  // Fetch live quotes for COP Retiros
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout;
+
+    const fetchLiveQuotes = async () => {
+      try {
+        const btcRes = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT');
+        if (btcRes.ok) {
+          const btcData = await btcRes.json();
+          setLiveBtcUsdt(parseFloat(btcData.price));
+        }
+
+        const copRes = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=USDTCOP');
+        if (copRes.ok) {
+          const copData = await copRes.json();
+          setLiveUsdtCop(parseFloat(copData.price));
+        }
+      } catch (err) {
+        console.error("Failed to fetch live quotes for COP Retiros", err);
+      }
+    };
+
+    if (user && showCopRetiros) {
+      fetchLiveQuotes();
+      intervalId = setInterval(fetchLiveQuotes, 60000);
+    }
+
+    return () => clearInterval(intervalId);
+  }, [user, showCopRetiros]);
+
   // Fetch BTC/USD price using Binance WebSockets
   const currentPriceRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const ws = new WebSocket('wss://stream.binance.com:9443/ws/btcusdt@ticker');
+    const wsBtc = new WebSocket('wss://stream.binance.com:9443/ws/btcusdt@ticker');
+    const wsCop = new WebSocket('wss://stream.binance.com:9443/ws/usdtcop@ticker');
 
-    ws.onmessage = (event) => {
+    wsBtc.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
         const newPrice = parseFloat(data.c);
-        
+
         if (currentPriceRef.current !== newPrice) {
           if (currentPriceRef.current !== null) {
             setPrevPrice(currentPriceRef.current);
@@ -554,12 +599,27 @@ export default function Home() {
       }
     };
 
-    ws.onerror = (error) => {
-      console.error('Binance WebSocket error:', error);
+    wsBtc.onerror = (error) => {
+      console.error('Binance WebSocket error (BTC):', error);
+    };
+
+    wsCop.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        const newCopPrice = parseFloat(data.c);
+        setCurrentUsdtCop(newCopPrice);
+      } catch (err) {
+        console.error('Error parsing Binance websocket data (COP):', err);
+      }
+    };
+
+    wsCop.onerror = (error) => {
+      console.error('Binance WebSocket error (COP):', error);
     };
 
     return () => {
-      ws.close();
+      wsBtc.close();
+      wsCop.close();
     };
   }, []);
 
@@ -635,12 +695,12 @@ export default function Home() {
       }
       const result = await response.json();
       console.log("Successfully fetched data:", result);
-      
+
       const mappedDeposits: MovementRow[] = allUserDeposits.map((dep) => {
         const d = new Date(dep.timestamp || Date.now());
         const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         const formattedDate = `${String(d.getDate()).padStart(2, '0')}-${months[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
-        
+
         return {
           id: String(dep.uid || user?.uid || '0'),
           Fecha: formattedDate,
@@ -1105,6 +1165,80 @@ export default function Home() {
     }
   };
 
+  const handleCopRetirosAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawVal = e.target.value.replace(/\D/g, ''); // Remove non-digits
+    const formattedVal = rawVal ? Number(rawVal).toLocaleString('de-DE') : '';
+    setCopRetirosAmount(formattedVal);
+
+    if (liveBtcUsdt && liveUsdtCop && rawVal) {
+      const btcEq = parseFloat(rawVal) / liveUsdtCop / liveBtcUsdt;
+      setCopRetirosBtcAmount(btcEq.toFixed(8));
+    } else {
+      setCopRetirosBtcAmount('');
+    }
+  };
+
+  const handleCopRetirosBtcAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setCopRetirosBtcAmount(val);
+    if (liveBtcUsdt && liveUsdtCop && val) {
+      const copEq = parseFloat(val) * liveBtcUsdt * liveUsdtCop;
+      setCopRetirosAmount(Math.floor(copEq).toLocaleString('de-DE'));
+    } else {
+      setCopRetirosAmount('');
+    }
+  };
+
+  const handleCopRetirosSubmit = async () => {
+    if (!user?.uid) {
+      setCopRetirosError('You must be logged in to submit a withdrawal.');
+      return;
+    }
+    const rawCopAmount = copRetirosAmount.replace(/\D/g, '');
+    if (!rawCopAmount || !copRetirosBtcAmount || !copRetirosBreBKey || !liveBtcUsdt || !liveUsdtCop) {
+      alert('Please fill out all fields and wait for live quotes.');
+      return;
+    }
+
+    const requestedBtc = parseFloat(copRetirosBtcAmount);
+    const fee = requestedBtc * 0.01;
+    const totalBtcToDeduct = requestedBtc + fee;
+
+    if (totalBtcToDeduct > (cryptoBalance + syncBtcBalance)) {
+      alert('Insufficient total BTC balance to cover amount + 1% fee.');
+      return;
+    }
+
+    const withdrawalData = {
+      userId: user.uid,
+      userEmail: user.email,
+      name: user.displayName || 'Unknown',
+      amount: parseFloat(rawCopAmount),
+      requestedBtcAmount: requestedBtc,
+      fee: fee,
+      totalBtcToDeduct: totalBtcToDeduct,
+      bankData: copRetirosBreBKey,
+      option: 'copRetiros',
+      timestamp: serverTimestamp(),
+      status: 'pending',
+      quote: { btcUsdt: liveBtcUsdt, usdtCop: liveUsdtCop }
+    };
+
+    try {
+      const newRef = push(ref(database, `withdrawals/${user.uid}`));
+      await set(newRef, withdrawalData);
+
+      alert('Solicitud de retiro COP enviado correctamente, pronto se enviarán los fondos.');
+      setCopRetirosError(null);
+      setCopRetirosAmount('');
+      setCopRetirosBtcAmount('');
+      setCopRetirosBreBKey('');
+      setShowCopRetiros(false);
+    } catch (err) {
+      console.error('Error submitting COP withdrawal:', err);
+      alert('Failed to submit withdrawal. Please try again.');
+    }
+  };
 
 
   /* ------------------------------------------------------------------ */
@@ -1437,6 +1571,18 @@ export default function Home() {
         receipt: { btcUsdt, usdtCop, totalCop },
       });
 
+      if (wd.option === 'copRetiros' && wd.requestedBtcAmount) {
+        const cryptoBalanceRef = ref(database, `cryptoBalances/${wd.uid}`);
+        const snap = await get(cryptoBalanceRef);
+        const currentBalance = snap.exists() ? parseFloat(snap.val().balance || 0) : 0;
+        const deduction = wd.totalBtcToDeduct || (wd.requestedBtcAmount * 1.01);
+        const newBalance = currentBalance - deduction;
+        await set(cryptoBalanceRef, {
+          balance: newBalance,
+          updatedAt: serverTimestamp()
+        });
+      }
+
       // Close and refresh list (box disappears via state)
       setSelectedBankWithdrawal(null);
     } catch (err: unknown) {
@@ -1585,12 +1731,95 @@ export default function Home() {
           <>
             <div className="bg-surface border border-surface-border backdrop-blur-md p-6 rounded-2xl shadow-lg mb-8 transition-transform hover:-translate-y-1">
               <h2 className="text-2xl font-bold mb-4 text-center text-white">BTC Wallet</h2>
-              <div className="flex justify-between items-center pb-3">
-                <span className="font-medium text-gray-400">Total BTC Balance</span>
-                <span className="text-3xl font-bold text-white tracking-wider">
-                  {(cryptoBalance + syncBtcBalance) > 0 ? (cryptoBalance + syncBtcBalance).toFixed(8) : "0.00000000"} <span className="text-primary">BTC</span>
-                </span>
+              <div className="flex flex-col gap-1 pb-3">
+                <div className="flex justify-between items-center">
+                  <span className="font-medium text-gray-400">Total BTC Balance</span>
+                  <span className="text-3xl font-bold text-white tracking-wider">
+                    {(cryptoBalance + syncBtcBalance) > 0 ? (cryptoBalance + syncBtcBalance).toFixed(8) : "0.00000000"} <span className="text-primary">BTC</span>
+                  </span>
+                </div>
+                {currentPrice && currentUsdtCop && (
+                  <div className="flex justify-end">
+                    <span className="text-sm font-medium text-gray-400">
+                      ≈ {((cryptoBalance + syncBtcBalance) * currentPrice * currentUsdtCop).toLocaleString('de-DE', { maximumFractionDigits: 0 })} COP
+                    </span>
+                  </div>
+                )}
               </div>
+            </div>
+
+            <div className="mb-8 w-full">
+              <button
+                onClick={() => setShowCopRetiros(!showCopRetiros)}
+                className="w-full px-4 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 rounded-2xl text-white font-bold text-lg shadow-[0_4px_20px_rgba(79,70,229,0.4)] transition-all active:scale-[0.98] flex items-center justify-center gap-2 border border-indigo-400/30"
+              >
+                <span>COP Retiros</span>
+                <ArrowsUpDownIcon className="w-6 h-6" />
+              </button>
+
+              {showCopRetiros && (
+                <div className="mt-4 bg-black/40 border border-surface-border p-6 rounded-2xl shadow-lg backdrop-blur-sm animate-fade-in">
+                  <h3 className="text-xl font-bold mb-4 text-white flex items-center gap-2">
+                    <span className="text-indigo-400">Retiro a Bre-B</span>
+                  </h3>
+
+                  {liveBtcUsdt && liveUsdtCop ? (
+                    <div className="text-xs text-yellow-400 mb-4 bg-yellow-400/10 p-2 rounded border border-yellow-400/20">
+                      Quote changes every minute. Rate: 1 BTC = ${(liveBtcUsdt * liveUsdtCop).toLocaleString('de-DE')} COP
+                    </div>
+                  ) : (
+                    <div className="text-xs text-gray-400 mb-4 animate-pulse">
+                      Fetching live quotes...
+                    </div>
+                  )}
+
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-1">Bre-B Key</label>
+                      <input
+                        type="text"
+                        value={copRetirosBreBKey}
+                        onChange={(e) => setCopRetirosBreBKey(e.target.value)}
+                        placeholder="Ej: 3001234567"
+                        className="w-full p-3 bg-gray-900/80 border border-gray-700 rounded-xl text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Amount (COP)</label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={copRetirosAmount}
+                          onChange={handleCopRetirosAmountChange}
+                          placeholder="0"
+                          className="w-full p-3 bg-gray-900/80 border border-gray-700 rounded-xl text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Equivalent (BTC)</label>
+                        <input
+                          type="number"
+                          value={copRetirosBtcAmount}
+                          onChange={handleCopRetirosBtcAmountChange}
+                          placeholder="0.00"
+                          className="w-full p-3 bg-gray-900/80 border border-gray-700 rounded-xl text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={handleCopRetirosSubmit}
+                      disabled={!liveBtcUsdt || !liveUsdtCop}
+                      className="w-full mt-2 px-4 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-xl text-white font-bold transition-all shadow-lg"
+                    >
+                      Solicitar Retiro
+                    </button>
+                    {copRetirosError && <p className="text-red-400 mt-2 text-sm text-center">{copRetirosError}</p>}
+                  </div>
+                </div>
+              )}
             </div>
 
             <h1 className="text-2xl font-bold mb-4 text-center">Saldos de Inversión</h1>
@@ -2276,9 +2505,27 @@ export default function Home() {
                 <p><strong>Email:</strong> {selectedBankWithdrawal.userEmail || 'N/A'}</p>
                 <p><strong>Amount:</strong> {selectedBankWithdrawal.amount.toLocaleString('de-DE')} COP</p>
                 <p><strong>Option:</strong> {selectedBankWithdrawal.option}</p>
-                <p><strong>Bank:</strong> {selectedBankWithdrawal.bank || 'N/A'}</p>
-                <p><strong>Bank Name:</strong> {selectedBankWithdrawal.bankName || 'N/A'}</p>
-                <p><strong>Country:</strong> {selectedBankWithdrawal.country || 'N/A'}</p>
+                {selectedBankWithdrawal.option === 'copRetiros' ? (
+                  <>
+                    <p className="flex items-center gap-2">
+                      <strong>Bre-B Key:</strong> {selectedBankWithdrawal.bankData || selectedBankWithdrawal.bank || 'N/A'}
+                      <button
+                        onClick={() => navigator.clipboard.writeText(selectedBankWithdrawal.bankData || selectedBankWithdrawal.bank || '')}
+                        className="p-1 hover:bg-gray-700 rounded transition-colors"
+                        title="Copy to clipboard"
+                      >
+                        <DocumentDuplicateIcon className="w-4 h-4 text-gray-300" />
+                      </button>
+                    </p>
+                    <p><strong>Requested BTC:</strong> {selectedBankWithdrawal.requestedBtcAmount}</p>
+                  </>
+                ) : (
+                  <>
+                    <p><strong>Bank:</strong> {selectedBankWithdrawal.bankData || selectedBankWithdrawal.bank || 'N/A'}</p>
+                    <p><strong>Bank Name:</strong> {selectedBankWithdrawal.bankName || 'N/A'}</p>
+                    <p><strong>Country:</strong> {selectedBankWithdrawal.country || 'N/A'}</p>
+                  </>
+                )}
                 <p><strong>Timestamp:</strong> {new Date(selectedBankWithdrawal.timestamp).toLocaleString()}</p>
                 <button
                   onClick={() => handleSettle(selectedBankWithdrawal)}
