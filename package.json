@@ -5,8 +5,8 @@
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build && rm -rf ../functions/.next && mkdir -p ../functions/.next && rsync -a --delete .next/ ../functions/.next/",
-    "deploy": "cd .. && npm run build && firebase deploy",
-    "deploy:functions": "cd .. && npm run build && firebase deploy --only functions",
+    "deploy": "pnpm run build && cd .. && firebase deploy",
+    "deploy:functions": "pnpm run build && cd .. && firebase deploy --only functions",
     "start": "next start",
     "lint": "next lint",
     "next": "next build"
@@ -50,5 +50,16 @@
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
     "typescript": "^5"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@firebase/util",
+      "bufferutil",
+      "protobufjs",
+      "secp256k1",
+      "sharp",
+      "unrs-resolver",
+      "utf-8-validate"
+    ]
   }
 }
