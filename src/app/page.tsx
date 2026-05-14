@@ -44,16 +44,6 @@ interface SpreadsheetRow {
 }
 
 // Interface for movement data (from getMovementsById)
-interface MovementRow {
-  id: string;
-  Fecha: string;
-  'Saldo COP': string;
-  'Precio BTC': string;
-  'Precio Dolar': string;
-  Total: string;
-  Operacion: string;
-  [key: string]: string | null;
-}
 
 const USDT_ABI = [
   "function transfer(address to, uint256 value) public returns (bool)",
@@ -72,6 +62,7 @@ interface InvoiceStatus {
 }
 
 interface BankWithdrawal {
+  saldoCop?: number;
   uid: string;
   requestId: string;
   userEmail?: string;  // Or 'email'
@@ -92,6 +83,7 @@ interface BankWithdrawal {
 }
 
 interface BankDeposit {
+  saldoCop?: number;
   uid?: string;
   depositId: string;
   parsedName: string;
@@ -114,9 +106,9 @@ interface BankDeposit {
 export default function Home() {
   const [id, setId] = useState<string>("");
   const [data, setData] = useState<SpreadsheetRow[]>([]);
-  const [movements, setMovements] = useState<MovementRow[]>([]);
   const [cryptoBalance, setCryptoBalance] = useState<number>(0);
   const [syncBtcBalance, setSyncBtcBalance] = useState<number>(0);
+  const [avgBuyPrice, setAvgBuyPrice] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   // State for BTC/USD price tracking
@@ -124,7 +116,6 @@ export default function Home() {
   const [prevPrice, setPrevPrice] = useState<number | null>(null);
   const [currentUsdtCop, setCurrentUsdtCop] = useState<number | null>(null);
   // State for sort order in movements
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   // State to toggle email form
   const [showEmailForm, setShowEmailForm] = useState<boolean>(false);
 
@@ -472,6 +463,7 @@ export default function Home() {
           } else {
             setSyncBtcBalance(0);
           }
+          setAvgBuyPrice(userBalance.avgBuyPrice || 0);
         } else {
           setSyncBtcBalance(0);
         }
@@ -636,7 +628,6 @@ export default function Home() {
   const fetchData = async () => {
     setLoading(true);
     setError(null);
-    setMovements([]); // Reset movements when fetching new balance data
     try {
 
       const auth = getAuth();
@@ -669,80 +660,11 @@ export default function Home() {
     }
   };
 
-  const fetchMovements = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const auth = getAuth();
-      const user = auth.currentUser;
-
-      if (!user) throw new Error("User not authenticated");
-
-      // 1. Get the Firebase ID token from the logged-in user.
-      const idToken = await user.getIdToken();
-
-      const response = await fetch(
-        `https://us-central1-rendimientos-5dbb9.cloudfunctions.net/getMovementsById?id=${id}`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${idToken}`, // <-- This is the crucial part
-          }
-        }
-      );
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`);
-      }
-      const result = await response.json();
-      console.log("Successfully fetched data:", result);
-
-      const mappedDeposits: MovementRow[] = allUserDeposits.map((dep) => {
-        const d = new Date(dep.timestamp || Date.now());
-        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        const formattedDate = `${String(d.getDate()).padStart(2, '0')}-${months[d.getMonth()]}-${String(d.getFullYear()).slice(-2)}`;
-
-        return {
-          id: String(dep.uid || user?.uid || '0'),
-          Fecha: formattedDate,
-          'Saldo COP': dep.amount?.toString() || '0',
-          'Precio BTC': dep.marketBuy?.btcUsdtPrice?.toString() || '0',
-          'Precio Dolar': dep.marketBuy?.usdtCopPrice?.toString() || '0',
-          Total: dep.marketBuy?.btcBought?.toString() || '0',
-          Operacion: 'Compra',
-        };
-      });
-
-      const combined = [...result.data, ...mappedDeposits];
-      setMovements(combined);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch movements");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (id) fetchData();
   };
 
-  const handleMovementsClick = () => {
-    if (id) fetchMovements();
-  };
-
-  // Handle Sort by Date
-  const handleSortByDate = () => {
-    const newSortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
-    setSortOrder(newSortOrder);
-
-    const sortedMovements = [...movements].sort((a, b) => {
-      const dateA = new Date(a.Fecha);
-      const dateB = new Date(b.Fecha);
-      return newSortOrder === 'asc' ? dateA.getTime() - dateB.getTime() : dateB.getTime() - dateA.getTime();
-    });
-
-    setMovements(sortedMovements);
-  };
 
   // Handle WhatsApp chat button click
   const handleWhatsAppClick = () => {
@@ -1745,6 +1667,55 @@ export default function Home() {
                     </span>
                   </div>
                 )}
+                {avgBuyPrice > 0 && (() => {
+                  // Compute weighted average BTC/USDT from loaded deposits
+                  let totalBtcWeighted = 0;
+                  let totalBtcQty = 0;
+                  allUserDeposits.forEach((dep) => {
+                    const btc = dep.marketBuy?.btcBought || 0;
+                    const price = dep.marketBuy?.btcUsdtPrice || 0;
+                    if (btc > 0 && price > 0) {
+                      totalBtcWeighted += btc * price;
+                      totalBtcQty += btc;
+                    }
+                  });
+                  const avgUsdt = totalBtcQty > 0 ? Math.round(totalBtcWeighted / totalBtcQty) : 0;
+
+                  // Compute Rendimiento (yield) from live BTC/COP vs avg buy price
+                  const currentBtcCop = currentPrice && currentUsdtCop ? currentPrice * currentUsdtCop : 0;
+                  const rendimiento = currentBtcCop > 0 && avgBuyPrice > 0
+                    ? ((currentBtcCop - avgBuyPrice) / avgBuyPrice) * 100
+                    : null;
+
+                  return (
+                    <div className="flex flex-col gap-2 pt-3 border-t border-surface-border/50">
+                      <div className="flex justify-between items-center">
+                        <span className="font-medium text-gray-400">Precio Prom. Compra</span>
+                        <span className="font-mono text-white bg-white/10 px-2 py-1 rounded">
+                          ${avgBuyPrice.toLocaleString('de-DE')} <span className="text-xs text-gray-400">COP/BTC</span>
+                        </span>
+                      </div>
+                      {avgUsdt > 0 && (
+                        <div className="flex justify-end">
+                          <span className="font-mono text-sm text-gray-400 bg-white/5 px-2 py-1 rounded">
+                            ${avgUsdt.toLocaleString('de-DE')} <span className="text-xs">USDT/BTC</span>
+                          </span>
+                        </div>
+                      )}
+                      {rendimiento !== null && (
+                        <div className="flex justify-between items-center pt-2">
+                          <span className="font-medium text-gray-400">Rendimiento</span>
+                          <span className={`text-xl font-bold ${rendimiento >= 0
+                            ? 'text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.5)]'
+                            : 'text-red-400 drop-shadow-[0_0_8px_rgba(248,113,113,0.5)]'
+                          }`}>
+                            {rendimiento >= 0 ? '+' : ''}{rendimiento.toFixed(2)}%
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
 
@@ -1869,13 +1840,6 @@ export default function Home() {
                     </div>
                   </div>
                 ))}
-                <button
-                  onClick={handleMovementsClick}
-                  disabled={loading}
-                  className="w-full mt-4 px-4 py-3 bg-secondary hover:bg-secondary/80 rounded-xl text-white font-semibold shadow-[0_0_15px_rgba(59,130,246,0.5)] disabled:bg-gray-700 disabled:shadow-none transition-all active:scale-[0.98]"
-                >
-                  {loading ? "Cargando..." : "Mostrar Movimientos"}
-                </button>
               </div>
             ) : (
               !loading && (
@@ -1885,60 +1849,6 @@ export default function Home() {
               )
             )}
 
-            {movements.length > 0 && (
-              <div className="mt-6">
-                <div className="flex items-center justify-center mb-4">
-                  <h2 className="text-xl font-bold">Movimientos</h2>
-                  <button
-                    onClick={handleSortByDate}
-                    className="ml-2 text-gray-400 hover:text-white focus:outline-none"
-                    title={`Ordenar por fecha (${sortOrder === 'asc' ? 'ascendente' : 'descendente'})`}
-                  >
-                    <ArrowsUpDownIcon className="w-5 h-5" />
-                  </button>
-                </div>
-                <div className="space-y-4">
-                  {movements.map((item, index) => (
-                    <div key={index} className="bg-gray-700 p-4 rounded shadow">
-                      <div className="flex justify-between">
-                        <span className="font-semibold text-gray-300">Fecha:</span>
-                        <span>{item.Fecha}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="font-semibold text-gray-300">Saldo COP:</span>
-                        <span className="text-gray-300">{item['Saldo COP']}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="font-semibold text-gray-300">Precio BTC:</span>
-                        <span className="text-gray-300">{item['Precio BTC']}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="font-semibold text-gray-300">Precio Dolar:</span>
-                        <span className="text-gray-300">{item['Precio Dolar']}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="font-semibold text-gray-300">Total BTC:</span>
-                        <span className="text-gray-300">{item.Total}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="font-semibold text-gray-300">Operación:</span>
-                        <span
-                          className={
-                            item.Operacion === 'Compra'
-                              ? 'text-green-400'
-                              : item.Operacion === 'Venta'
-                                ? 'text-red-400'
-                                : 'text-gray-300'
-                          }
-                        >
-                          {item.Operacion}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
 
             {loading && (
               <div className="flex justify-center mt-4">
@@ -2656,7 +2566,7 @@ export default function Home() {
                       {'parsedName' in item ? (
                         <>
                           <p className="text-white font-medium">Deposito Recibido</p>
-                          <p className="text-green-400 font-bold">${item.amount} <span className="text-xs text-gray-500">[{item.status}]</span></p>
+                          <p className="text-green-400 font-bold">${item.saldoCop ? item.saldoCop.toLocaleString('de-DE') : item.amount} <span className="text-xs text-gray-500">[{item.status}]</span></p>
                           {'marketBuy' in item && item.marketBuy && (
                             <div className="mt-2 text-xs bg-black/20 p-2 rounded">
                               <p className="text-gray-300">Market Buy: {item.marketBuy.btcBought} BTC</p>
@@ -2668,7 +2578,7 @@ export default function Home() {
                       ) : (
                         <>
                           <p className="text-white font-medium">Retiro a {item.bankName || 'Bitcoin'}</p>
-                          <p className="text-red-400 font-bold">${item.amount} <span className="text-xs text-gray-500">[{item.status}]</span></p>
+                          <p className="text-red-400 font-bold">${item.saldoCop ? item.saldoCop.toLocaleString('de-DE') : item.amount} <span className="text-xs text-gray-500">[{item.status}]</span></p>
                         </>
                       )}
                     </div>
