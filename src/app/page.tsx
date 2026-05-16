@@ -64,8 +64,9 @@ interface InvoiceStatus {
 interface BankWithdrawal {
   saldoCop?: number;
   uid: string;
+  accountId?: string;
   requestId: string;
-  userEmail?: string;  // Or 'email'
+  userEmail: string;
   amount: number;      // COP for banks
   requestedBtcAmount?: number; // Store for copRetiros
   fee?: number;
@@ -79,6 +80,11 @@ interface BankWithdrawal {
   timestamp: number;   // Unix ms
   status?: string;
   userNotified?: boolean;
+  receipt?: {
+    btcUsdt?: number;
+    usdtCop?: number;
+    totalCop?: number;
+  };
   // Add other fields as stored
 }
 
@@ -1016,40 +1022,56 @@ export default function Home() {
       return;  // Early exit for unauth
     }
 
-    if (!withdrawalName || !withdrawalId || !withdrawalBank || !withdrawalBankName || !withdrawalAmount) {
+    if (!withdrawalName || !withdrawalId || !withdrawalBank || !withdrawalBankName || !withdrawalAmount || !withdrawalOption) {
       // Handle form validation
       alert('Please fill out all fields.');
       return;
     }
 
-    // Structure data (teaching: Use interfaces for type safety)
-    interface WithdrawalData {
-      userId: string;
-      userEmail: string | null;
-      name: string;
-      id: string;
-      bankData: string;
-      bankName: string;
-      country: string;
-      amount: string;
-      option: 'bancosColombia' | 'bancosInternacionales' | 'btcLightning' | 'usdtWallet' | null;
-      timestamp: unknown;  // ServerTimestamp
-      status: 'pending';
+    const isConfirmed = window.confirm('¿Estás seguro de que deseas enviar esta solicitud de retiro?');
+    if (!isConfirmed) {
+      return;
     }
 
-    const withdrawalData: WithdrawalData = {
-      userId: user.uid,
-      userEmail: user.email,
+    let currentBtcUsdt = liveBtcUsdt;
+    let currentUsdtCop = liveUsdtCop;
+
+    try {
+      // Fetch the absolute freshest prices directly from Binance at the exact moment of click
+      const [btcRes, copRes] = await Promise.all([
+        fetch('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT'),
+        fetch('https://api.binance.com/api/v3/ticker/price?symbol=USDTCOP')
+      ]);
+      const btcData = await btcRes.json();
+      const copData = await copRes.json();
+
+      if (btcData.price) currentBtcUsdt = parseFloat(btcData.price);
+      if (copData.price) currentUsdtCop = parseFloat(copData.price);
+    } catch (err) {
+      console.warn('Failed to fetch exact live prices, falling back to UI state', err);
+    }
+
+    const withdrawalData: Omit<BankWithdrawal, 'requestId'> = {
+      uid: user.uid,
+      userEmail: user.email || 'email',
       name: withdrawalName.trim(),  // Sanitize inputs
-      id: withdrawalId,
+      accountId: withdrawalId,
       bankData: withdrawalBank,
       bankName: withdrawalBankName,
       country: withdrawalCountry,
-      amount: withdrawalAmount,
+      amount: parseFloat(withdrawalAmount),
       option: withdrawalOption,
-      timestamp: serverTimestamp(),
+      timestamp: Date.now(),
       status: 'pending',
+      ...(currentBtcUsdt || currentUsdtCop ? {
+        receipt: {
+          ...(currentBtcUsdt && { btcUsdt: currentBtcUsdt }),
+          ...(currentUsdtCop && { usdtCop: currentUsdtCop })
+        }
+      } : {})
     };
+
+    if (withdrawalData.option = 'bancosColombia') { withdrawalData.country = 'CO' }
 
     try {
       // Determine path (teaching: Conditional logic for domestic/int'l)
@@ -1131,9 +1153,9 @@ export default function Home() {
       return;
     }
 
-    const withdrawalData = {
-      userId: user.uid,
-      userEmail: user.email,
+    const withdrawalData: Omit<BankWithdrawal, 'requestId'> = {
+      uid: user.uid,
+      userEmail: user.email || 'email',
       name: user.displayName || 'Unknown',
       amount: parseFloat(rawCopAmount),
       requestedBtcAmount: requestedBtc,
@@ -1141,16 +1163,16 @@ export default function Home() {
       totalBtcToDeduct: totalBtcToDeduct,
       bankData: copRetirosBreBKey,
       option: 'copRetiros',
-      timestamp: serverTimestamp(),
+      timestamp: Date.now(),
       status: 'pending',
-      quote: { btcUsdt: liveBtcUsdt, usdtCop: liveUsdtCop }
+      receipt: { btcUsdt: liveBtcUsdt, usdtCop: liveUsdtCop }
     };
 
     try {
       const newRef = push(ref(database, `withdrawals/${user.uid}`));
       await set(newRef, withdrawalData);
 
-      alert('Solicitud de retiro COP enviado correctamente, pronto se enviarán los fondos.');
+      alert('Solicitud de retiro COP enviado correctamente, Revisa tu correo y confirma.');
       setCopRetirosError(null);
       setCopRetirosAmount('');
       setCopRetirosBtcAmount('');
@@ -1421,76 +1443,18 @@ export default function Home() {
   };
 
   //---------------------------------------------------------------- */
-  // Handle loading state
-  //---------------------------------------------------------------- */
-
-  const handleSync = useCallback(async () => {
-    if (!user) return; // Safety check, though admin section already gates this
-
-    try {
-      const idToken = await user.getIdToken(); // Get Firebase ID token for auth
-      const response = await fetch('https://us-central1-rendimientos-5dbb9.cloudfunctions.net/syncSheetsToRTDB', {
-        method: 'GET', // Matches the function's onRequest (handles GET)
-        headers: {
-          'Authorization': `Bearer ${idToken}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Sync failed');
-      }
-
-    } catch (err: unknown) {
-      console.error('Sync error:', err);
-    }
-  }, [user]);
-
-  // Sync right after login
-  useEffect(() => {
-    if (user?.uid) {
-      handleSync();
-    }
-  }, [user?.uid, handleSync]);
-
-  //---------------------------------------------------------------- */
-  // Handle bank Settlement state
+  // Handle bank Settlement state for Withdrawals
   //---------------------------------------------------------------- */
 
   const handleSettle = async (wd: BankWithdrawal) => {
     setSettleLoading(true);
     setSettleError(null);
     try {
-      const ts = wd.timestamp;
-      if (!ts) throw new Error('Missing timestamp');
-      const startTime = ts - 60000;  // 1min before
-      const endTime = ts + 60000;    // 1min after
-
-      // BTC/USDT (close price [4])
-      const btcUrl = `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&startTime=${startTime}&endTime=${endTime}&limit=1`;
-      const btcRes = await fetch(btcUrl);
-      if (!btcRes.ok) throw new Error('Binance BTC error');
-      const btcData: number[][] = await btcRes.json();
-      if (!btcData[0]) throw new Error('No BTC data');
-      const btcUsdt = btcData[0][4];
-
-      // USDT/COP (USDTCOP symbol; COP per USDT)
-      const copUrl = `https://api.binance.com/api/v3/klines?symbol=USDTCOP&interval=1m&startTime=${startTime}&endTime=${endTime}&limit=1`;
-      const copRes = await fetch(copUrl);
-      if (!copRes.ok) throw new Error('Binance COP error');
-      const copData: number[][] = await copRes.json();
-      if (!copData[0]) throw new Error('No COP data');
-      const usdtCop = copData[0][4];
-
-      // Total COP (assume wd.amount is COP)
-      const totalCop = wd.amount;
 
       // Update RTDB
       const wdRef = ref(database, `withdrawals/${wd.uid}/${wd.requestId}`);
       await update(wdRef, {
-        status: 'settled',
-        receipt: { btcUsdt, usdtCop, totalCop },
+        status: 'settled'
       });
 
       if (wd.option === 'copRetiros' && wd.requestedBtcAmount) {
@@ -1708,7 +1672,7 @@ export default function Home() {
                           <span className={`text-xl font-bold ${rendimiento >= 0
                             ? 'text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.5)]'
                             : 'text-red-400 drop-shadow-[0_0_8px_rgba(248,113,113,0.5)]'
-                          }`}>
+                            }`}>
                             {rendimiento >= 0 ? '+' : ''}{rendimiento.toFixed(2)}%
                           </span>
                         </div>
@@ -2546,7 +2510,7 @@ export default function Home() {
                   <div key={idx} className="bg-white/5 p-4 rounded-xl border border-white/10">
                     <p className="text-sm text-gray-400 mb-1">{new Date(dep.timestamp || 0).toLocaleString()}</p>
                     <p className="text-white font-medium">Deposito de {dep.parsedName}</p>
-                    <p className="text-green-400 font-bold">${dep.amount} <span className="text-xs text-gray-500">[{dep.status}]</span></p>
+                    <p className="text-green-400 font-bold">${Number(String(dep.amount).replace(/,/g, '')).toLocaleString('de-DE')} <span className="text-xs text-gray-500">[{dep.status}]</span></p>
                     {dep.marketBuy && (
                       <div className="mt-2 text-xs bg-black/20 p-2 rounded">
                         <p className="text-gray-300">Market Buy: {dep.marketBuy.btcBought} BTC</p>
@@ -2566,7 +2530,7 @@ export default function Home() {
                       {'parsedName' in item ? (
                         <>
                           <p className="text-white font-medium">Deposito Recibido</p>
-                          <p className="text-green-400 font-bold">${item.saldoCop ? item.saldoCop.toLocaleString('de-DE') : item.amount} <span className="text-xs text-gray-500">[{item.status}]</span></p>
+                          <p className="text-green-400 font-bold">${item.saldoCop ? item.saldoCop.toLocaleString('de-DE') : Number(String(item.amount).replace(/,/g, '')).toLocaleString('de-DE')} <span className="text-xs text-gray-500">[{item.status}]</span></p>
                           {'marketBuy' in item && item.marketBuy && (
                             <div className="mt-2 text-xs bg-black/20 p-2 rounded">
                               <p className="text-gray-300">Market Buy: {item.marketBuy.btcBought} BTC</p>
@@ -2578,7 +2542,13 @@ export default function Home() {
                       ) : (
                         <>
                           <p className="text-white font-medium">Retiro a {item.bankName || 'Bitcoin'}</p>
-                          <p className="text-red-400 font-bold">${item.saldoCop ? item.saldoCop.toLocaleString('de-DE') : item.amount} <span className="text-xs text-gray-500">[{item.status}]</span></p>
+                          <p className="text-red-400 font-bold">${item.saldoCop ? item.saldoCop.toLocaleString('de-DE') : Number(String(item.amount).replace(/,/g, '')).toLocaleString('de-DE')} <span className="text-xs text-gray-500">[{item.status}]</span></p>
+                          {'receipt' in item && item.receipt && (
+                            <div className="mt-2 text-xs bg-black/20 p-2 rounded">
+                              {item.receipt.btcUsdt && <p className="text-gray-400">BTC/USDT: ${item.receipt.btcUsdt}</p>}
+                              {item.receipt.usdtCop && <p className="text-gray-400">USDT/COP: ${item.receipt.usdtCop}</p>}
+                            </div>
+                          )}
                         </>
                       )}
                     </div>
