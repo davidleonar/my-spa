@@ -4,7 +4,7 @@ import '../app/globals.css';
 import { ArrowsUpDownIcon, BellIcon, DocumentDuplicateIcon } from '@heroicons/react/24/outline';
 import { QRCodeCanvas } from 'qrcode.react';
 import { auth, database } from '../app/lib/firebase'; // Adjust path
-import { ref, set, push, serverTimestamp, onValue, update, get } from "firebase/database";
+import { ref, set, push, serverTimestamp, onValue, update } from "firebase/database";
 import {
   GoogleAuthProvider,
   signInWithPopup,
@@ -1456,18 +1456,6 @@ export default function Home() {
       await update(wdRef, {
         status: 'settled'
       });
-
-      if (wd.option === 'copRetiros' && wd.requestedBtcAmount) {
-        const cryptoBalanceRef = ref(database, `cryptoBalances/${wd.uid}`);
-        const snap = await get(cryptoBalanceRef);
-        const currentBalance = snap.exists() ? parseFloat(snap.val().balance || 0) : 0;
-        const deduction = wd.totalBtcToDeduct || (wd.requestedBtcAmount * 1.01);
-        const newBalance = currentBalance - deduction;
-        await set(cryptoBalanceRef, {
-          balance: newBalance,
-          updatedAt: serverTimestamp()
-        });
-      }
 
       // Close and refresh list (box disappears via state)
       setSelectedBankWithdrawal(null);
