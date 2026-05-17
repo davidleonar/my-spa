@@ -147,6 +147,8 @@ export default function Home() {
   const [showSavings, setShowSavings] = useState<boolean>(false);
   const [savingsOption, setSavingsOption] = useState<'bancosColombia' | 'btcLightning' | 'bancosEuropa' | 'bancosUSA' | 'usdtPolygon' | null>(null);
   const [savingsAmount, setSavingsAmount] = useState<number>(1000);
+  const [savingsAmountFormatted, setSavingsAmountFormatted] = useState<string>('1.000');
+  const [showBtcLightningDeposit, setShowBtcLightningDeposit] = useState<boolean>(false);
   const [savingsBolt11, setSavingsBolt11] = useState<string | null>(null);
   const [savingsPaymentStatus, setSavingsPaymentStatus] = useState<'pending' | 'settled' | null>(null);
   const [savingsError, setSavingsError] = useState<string | null>(null);
@@ -177,7 +179,8 @@ export default function Home() {
 
   const [withdrawalError, setWithdrawalError] = useState<string | null>(null);  // Add for UX feedback
 
-  // States for COP Retiros
+  // States for COP Depositos and Retiros
+  const [showCopDepositos, setShowCopDepositos] = useState<boolean>(false);
   const [showCopRetiros, setShowCopRetiros] = useState<boolean>(false);
   const [copRetirosAmount, setCopRetirosAmount] = useState<string>('');
   const [copRetirosBtcAmount, setCopRetirosBtcAmount] = useState<string>('');
@@ -362,10 +365,12 @@ export default function Home() {
   useEffect(() => {
     if (!user) return; // Exit early if no user is signed in
 
+    const unsubscribes: Array<() => void> = [];
+
     if (user.uid === '5XgksHrgmyeGqqKFYGVjQVM0KGl1') {
       // Admin Listener: Listen to all withdrawals
       const withdrawalsRef = ref(database, 'withdrawals');
-      const unsubscribeW = onValue(withdrawalsRef, (snapshot) => {
+      const unsubscribeAdminW = onValue(withdrawalsRef, (snapshot) => {
         const filtered: BankWithdrawal[] = [];
         snapshot.forEach((userSnap) => {
           userSnap.forEach((reqSnap) => {
@@ -384,9 +389,10 @@ export default function Home() {
         setPendingBankWithdrawals(filtered);
         setAdminUnreadCount(filtered.length);
       }, (error) => console.error('onValue error:', error));
+      unsubscribes.push(unsubscribeAdminW);
 
       const unassignedRef = ref(database, 'unassignedDeposits');
-      const unsubscribeD = onValue(unassignedRef, (snapshot) => {
+      const unsubscribeAdminD = onValue(unassignedRef, (snapshot) => {
         const unassigned: BankDeposit[] = [];
         const allAdmin: BankDeposit[] = [];
         snapshot.forEach((reqSnap) => {
@@ -400,88 +406,85 @@ export default function Home() {
         setAdminUnassignedDeposits(unassigned);
         setAllAdminDeposits(allAdmin.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)));
       });
+      unsubscribes.push(unsubscribeAdminD);
+    }
 
-      return () => {
-        unsubscribeW();
-        unsubscribeD();
-      };
-    } else {
-      // Regular User Listener: Listen to their own withdrawals and deposits
-      const userWithdrawalsRef = ref(database, `withdrawals/${user.uid}`);
-      const unsubscribeW = onValue(userWithdrawalsRef, (snapshot) => {
-        const unreadNotifications: BankWithdrawal[] = [];
-        const allW: BankWithdrawal[] = [];
-        snapshot.forEach((reqSnap) => {
-          const data = reqSnap.val();
-          if (data.status === 'settled') {
-            const wd = {
-              uid: user.uid,
-              requestId: reqSnap.key!,
-              ...data,
-            };
-            allW.push(wd);
-            if (!data.userNotified) {
-              unreadNotifications.push(wd);
-            }
-          }
-        });
-        setUserUnreadNotifications(unreadNotifications);
-        setAllUserWithdrawals(allW.sort((a, b) => b.timestamp - a.timestamp));
-      }, (error) => console.error('onValue error:', error));
-
-      const userDepositsRef = ref(database, `deposits/${user.uid}`);
-      const unsubscribeD = onValue(userDepositsRef, (snapshot) => {
-        const depositNotifs: BankDeposit[] = [];
-        const allD: BankDeposit[] = [];
-        snapshot.forEach((reqSnap) => {
-          const data = reqSnap.val();
-          const dep = {
+    // Regular User Listener: Listen to their own withdrawals and deposits
+    const userWithdrawalsRef = ref(database, `withdrawals/${user.uid}`);
+    const unsubscribeW = onValue(userWithdrawalsRef, (snapshot) => {
+      const unreadNotifications: BankWithdrawal[] = [];
+      const allW: BankWithdrawal[] = [];
+      snapshot.forEach((reqSnap) => {
+        const data = reqSnap.val();
+        if (data.status === 'settled') {
+          const wd = {
             uid: user.uid,
-            depositId: reqSnap.key!,
+            requestId: reqSnap.key!,
             ...data,
           };
-          allD.push(dep);
+          allW.push(wd);
           if (!data.userNotified) {
-            depositNotifs.push(dep);
+            unreadNotifications.push(wd);
           }
-        });
-        setUserUnreadDeposits(depositNotifs);
-        setAllUserDeposits(allD.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)));
-      });
-
-      const cryptoBalanceRef = ref(database, `cryptoBalances/${user.uid}`);
-      const unsubscribeC = onValue(cryptoBalanceRef, (snapshot) => {
-        if (snapshot.exists()) {
-          setCryptoBalance(snapshot.val().balance || 0);
-        } else {
-          setCryptoBalance(0);
         }
       });
+      setUserUnreadNotifications(unreadNotifications);
+      setAllUserWithdrawals(allW.sort((a, b) => b.timestamp - a.timestamp));
+    }, (error) => console.error('onValue error:', error));
+    unsubscribes.push(unsubscribeW);
 
-      const balancesRef = ref(database, `balances/${user.uid}`);
-      const unsubscribeB = onValue(balancesRef, (snapshot) => {
-        if (snapshot.exists()) {
-          const userBalance = snapshot.val();
-          const btcProp = userBalance.BTCBalance ?? userBalance.BTCbalance ?? userBalance.btcBalance;
-          if (btcProp) {
-            const btcStr = btcProp.toString().replace(',', '.');
-            setSyncBtcBalance(parseFloat(btcStr) || 0);
-          } else {
-            setSyncBtcBalance(0);
-          }
-          setAvgBuyPrice(userBalance.avgBuyPrice || 0);
+    const userDepositsRef = ref(database, `deposits/${user.uid}`);
+    const unsubscribeD = onValue(userDepositsRef, (snapshot) => {
+      const depositNotifs: BankDeposit[] = [];
+      const allD: BankDeposit[] = [];
+      snapshot.forEach((reqSnap) => {
+        const data = reqSnap.val();
+        const dep = {
+          uid: user.uid,
+          depositId: reqSnap.key!,
+          ...data,
+        };
+        allD.push(dep);
+        if (!data.userNotified) {
+          depositNotifs.push(dep);
+        }
+      });
+      setUserUnreadDeposits(depositNotifs);
+      setAllUserDeposits(allD.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)));
+    });
+    unsubscribes.push(unsubscribeD);
+
+    const cryptoBalanceRef = ref(database, `cryptoBalances/${user.uid}`);
+    const unsubscribeC = onValue(cryptoBalanceRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setCryptoBalance(snapshot.val().balance || 0);
+      } else {
+        setCryptoBalance(0);
+      }
+    });
+    unsubscribes.push(unsubscribeC);
+
+    const balancesRef = ref(database, `balances/${user.uid}`);
+    const unsubscribeB = onValue(balancesRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const userBalance = snapshot.val();
+        const btcProp = userBalance.BTCBalance ?? userBalance.BTCbalance ?? userBalance.btcBalance;
+        if (btcProp) {
+          const btcStr = btcProp.toString().replace(',', '.');
+          setSyncBtcBalance(parseFloat(btcStr) || 0);
         } else {
           setSyncBtcBalance(0);
         }
-      });
+        setAvgBuyPrice(userBalance.avgBuyPrice || 0);
+      } else {
+        setSyncBtcBalance(0);
+      }
+    });
+    unsubscribes.push(unsubscribeB);
 
-      return () => {
-        unsubscribeW();
-        unsubscribeD();
-        unsubscribeC();
-        unsubscribeB();
-      };
-    }
+    return () => {
+      unsubscribes.forEach((unsub) => unsub());
+    };
   }, [user]);
 
   const handleAdminBellClick = async () => {
@@ -692,6 +695,7 @@ export default function Home() {
 
   const resetSavings = useCallback(() => {
     setSavingsAmount(1000);
+    setSavingsAmountFormatted('1.000');
     setSavingsBolt11(null);
     setSavingsPaymentHash(null);
     setSavingsPaymentStatus(null);
@@ -860,22 +864,28 @@ export default function Home() {
           if (invoice.settled) {
             setSavingsPaymentStatus('settled');
             console.log('Savings settled! Amount:', invoice.amt_paid_sat, 'sats');
-            alert(`¡Ahorro recibido! ${Number(invoice.amt_paid_sat)} sats`);
 
             if (user) {
-              const savingsData = {
-                userId: user.uid,
-                amount: Number(invoice.amt_paid_sat),
-                settledAt: serverTimestamp(),
-                r_hash: savingsPaymentHash,
-                network: 'BTC Lightning',
+              const btcAmount = Number(invoice.amt_paid_sat) / 100_000_000;
+              const depositData = {
+                uid: user.uid,
+                depositId: savingsPaymentHash,
+                parsedName: "BTC Lightning Deposit",
+                status: "settled",
+                timestamp: Date.now(),
+                marketBuy: {
+                  btcBought: btcAmount,
+                  btcUsdtPrice: liveBtcUsdt || 0,
+                  usdtCopPrice: liveUsdtCop || 0
+                }
               };
-              await set(ref(database, `userSavings/${user.uid}/${savingsPaymentHash}`), savingsData);
+              await set(ref(database, `deposits/${user.uid}/${savingsPaymentHash}`), depositData);
             }
 
             setTimeout(() => {
               resetSavings();
-            }, 3000);
+              setShowBtcLightningDeposit(false);
+            }, 4000);
           }
         } catch (error) {
           console.error('Check savings status error:', error);
@@ -893,7 +903,7 @@ export default function Home() {
       clearInterval(interval);
       clearTimeout(timeout);
     };
-  }, [savingsPaymentHash, savingsPaymentStatus, resetSavings, user]);
+  }, [savingsPaymentHash, savingsPaymentStatus, resetSavings, user, liveBtcUsdt, liveUsdtCop]);
 
   const generateSavingsInvoice = async () => {
     if (savingsAmount <= 0) {
@@ -1150,6 +1160,11 @@ export default function Home() {
 
     if (totalBtcToDeduct > (cryptoBalance + syncBtcBalance)) {
       alert('Insufficient total BTC balance to cover amount + 1% fee.');
+      return;
+    }
+
+    const isConfirmed = window.confirm('¿Estás seguro de que deseas enviar esta solicitud de retiro?');
+    if (!isConfirmed) {
       return;
     }
 
@@ -1671,6 +1686,151 @@ export default function Home() {
               </div>
             </div>
 
+            <div className="mb-4 w-full">
+              <button
+                onClick={() => setShowCopDepositos(!showCopDepositos)}
+                className="w-full px-4 py-4 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 rounded-2xl text-white font-bold text-lg shadow-[0_4px_20px_rgba(16,185,129,0.4)] transition-all active:scale-[0.98] flex items-center justify-center gap-2 border border-emerald-400/30"
+              >
+                <span>COP Depositos</span>
+                <ArrowsUpDownIcon className="w-6 h-6" />
+              </button>
+
+              {showCopDepositos && (
+                <div className="mt-4 bg-black/40 border border-surface-border p-6 rounded-2xl shadow-lg backdrop-blur-sm animate-fade-in">
+                  <h3 className="text-xl font-bold mb-4 text-white flex items-center gap-2">
+                    <span className="text-emerald-400">Depositar con Bre-B</span>
+                  </h3>
+                  <div className="mt-4 text-center flex flex-col items-center">
+                    <Image
+                      src="/QR_rendimientos.jpg"
+                      alt="QR COP Depositos"
+                      width={300}
+                      height={300}
+                      className="rounded-lg mb-6 shadow-[0_0_15px_rgba(255,255,255,0.1)]"
+                    />
+                    <div className="w-full max-w-xs mb-4">
+                      <label className="block text-sm font-medium text-gray-300 mb-1 text-left">Bre-B Key</label>
+                      <div className="flex justify-between items-center bg-gray-900/80 border border-gray-700 rounded-xl px-4 py-3 shadow-sm transition-all hover:bg-gray-800/80">
+                        <span className="text-lg font-medium font-mono text-gray-200 tracking-wider">0092325247</span>
+                        <button
+                          onClick={() => {
+                            if (navigator.clipboard && navigator.clipboard.writeText) {
+                              navigator.clipboard.writeText("0092325247");
+                              setCopiedBancos(true);
+                              setTimeout(() => setCopiedBancos(false), 2000);
+                            }
+                          }}
+                          className="p-2 bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-400 rounded-lg transition-all active:scale-95"
+                          title="Copiar Bre-B Key"
+                        >
+                          <DocumentDuplicateIcon className="w-5 h-5" />
+                        </button>
+                      </div>
+                      {copiedBancos && <p className="mt-2 text-sm text-green-400 font-medium">¡Copiado!</p>}
+                    </div>
+                    <p className="text-sm mt-2 text-gray-300">Escanea este codigo QR o copia esta llave para realizar transferencias desde cualquier banco en Colombia. Una vez realizada la transferencia, enviar el comprobante haciendo click en &apos;Contacto&apos;.</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="mb-4 w-full">
+              <button
+                onClick={() => setShowBtcLightningDeposit(!showBtcLightningDeposit)}
+                className="w-full px-4 py-4 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-400 hover:to-orange-400 rounded-2xl text-white font-bold text-lg shadow-[0_4px_20px_rgba(245,158,11,0.4)] transition-all active:scale-[0.98] flex items-center justify-center gap-2 border border-orange-400/30"
+              >
+                <span>Deposit via BTC Lightning</span>
+                <span className="text-2xl" title="thunder icon">⚡</span>
+              </button>
+
+              {showBtcLightningDeposit && (
+                <div className="mt-4 bg-black/40 border border-surface-border p-6 rounded-2xl shadow-lg backdrop-blur-sm animate-fade-in">
+                  <h3 className="text-xl font-bold mb-4 text-white flex items-center gap-2">
+                    <span className="text-yellow-400">⚡ Savings (BTC Lightning)</span>
+                  </h3>
+                  
+                  {savingsPaymentStatus === 'settled' ? (
+                    <div className="bg-green-500/20 border border-green-500/50 p-6 rounded-xl text-center animate-fade-in shadow-[0_0_20px_rgba(34,197,94,0.3)]">
+                      <div className="text-4xl mb-4">🎉</div>
+                      <h4 className="text-xl font-bold text-green-400 mb-2">¡Ahorro recibido!</h4>
+                      <p className="text-green-200">Deposit successful.</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="relative mb-4">
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={savingsAmountFormatted}
+                          onChange={(e) => {
+                            const rawVal = e.target.value.replace(/\D/g, '');
+                            const numVal = parseInt(rawVal, 10);
+                            if (!isNaN(numVal) && rawVal !== '') {
+                              setSavingsAmountFormatted(numVal.toLocaleString('de-DE'));
+                              setSavingsAmount(numVal);
+                            } else {
+                              setSavingsAmountFormatted('');
+                              setSavingsAmount(0);
+                            }
+                          }}
+                          placeholder="Amount"
+                          className="w-full p-4 bg-gray-900/80 border border-gray-700 rounded-xl text-white focus:ring-2 focus:ring-yellow-500 outline-none text-lg pr-20"
+                        />
+                        <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 font-medium">⚡ sats</span>
+                      </div>
+                      
+                      <button
+                        onClick={generateSavingsInvoice}
+                        disabled={savingsAmount <= 0 || savingsPaymentStatus === 'pending'}
+                        className="w-full px-4 py-3 bg-yellow-600 hover:bg-yellow-500 rounded-xl mb-4 disabled:bg-gray-700 disabled:text-gray-500 font-bold transition-all shadow-lg"
+                        title={savingsAmount <= 0 ? 'Enter an amount greater than 0' : savingsPaymentStatus === 'pending' ? 'Waiting for payment' : ''}
+                      >
+                        Generate Savings Invoice
+                      </button>
+
+                      {savingsLoading && (
+                        <div className="flex justify-center mt-4">
+                          <div className="w-6 h-6 border-2 border-t-yellow-500 border-gray-600 rounded-full animate-spin"></div>
+                        </div>
+                      )}
+                      
+                      {isClient && savingsBolt11 && (
+                        <div className="mt-6 text-center bg-white/5 border border-surface-border p-6 rounded-xl backdrop-blur-md">
+                          <div className="bg-white p-2 rounded-xl inline-block shadow-lg">
+                            <QRCodeCanvas value={savingsBolt11} size={180} />
+                          </div>
+                          <p className="mt-4 text-gray-300">Scan to save <strong className="text-white">{savingsAmountFormatted} sats</strong></p>
+                          <div className="mt-4 flex items-center bg-gray-900/80 rounded-lg p-2 border border-gray-700">
+                            <p className="text-xs text-gray-400 break-all px-2 line-clamp-2 overflow-hidden text-left flex-1">
+                              {savingsBolt11}
+                            </p>
+                            <button
+                              onClick={handleCopySavingsRequest}
+                              className="ml-2 p-2 bg-yellow-500/20 hover:bg-yellow-500/40 text-yellow-400 rounded-lg transition-all active:scale-95 whitespace-nowrap"
+                            >
+                              {copySavingsButtonText === 'Copied!' ? '¡Copiado!' : 'Copy'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {savingsPaymentStatus === 'pending' && (
+                        <div className="mt-4 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-center animate-pulse">
+                          <p className="text-yellow-400 font-medium">Payment pending... waiting for settlement</p>
+                        </div>
+                      )}
+
+                      {savingsError && (
+                        <div className="mt-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-center">
+                          <p className="text-red-400">{savingsError}</p>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="mb-8 w-full">
               <button
                 onClick={() => setShowCopRetiros(!showCopRetiros)}
@@ -1820,99 +1980,6 @@ export default function Home() {
             {showSavings && (
               <div className="bg-gray-700 p-4 rounded shadow">
                 <div className="flex flex-col space-y-4">
-                  <button
-                    onClick={() => setSavingsOption('bancosColombia')}
-                    className={`px-4 py-2 rounded ${savingsOption === 'bancosColombia' ? 'bg-blue-600' : 'bg-gray-600'
-                      } text-white hover:bg-blue-700 transition-colors`}
-                  >
-                    Bancos Colombia
-                  </button>
-                  {savingsOption === 'bancosColombia' && (
-                    <div className="mt-4 text-center p-4 bg-gray-800 rounded flex flex-col items-center">
-                      <Image
-                        src="/QR_rendimientos.jpg"
-                        alt="QR Bancos Colombia"
-                        width={200}
-                        height={200}
-                        className="rounded-lg mb-4 shadow-[0_0_15px_rgba(255,255,255,0.1)]"
-                      />
-                      <div className="flex justify-center items-center mb-4 bg-white/5 border border-surface-border rounded-xl px-4 py-2 shadow-sm transition-all hover:bg-white/10">
-                        <span className="text-lg font-medium font-mono text-gray-200 tracking-wider">0092325247</span>
-                        <button
-                          onClick={() => {
-                            if (navigator.clipboard && navigator.clipboard.writeText) {
-                              navigator.clipboard.writeText("0092325247");
-                              setCopiedBancos(true);
-                              setTimeout(() => setCopiedBancos(false), 2000);
-                            }
-                          }}
-                          className="ml-4 p-2 bg-blue-500/20 hover:bg-blue-500/40 text-blue-400 rounded-lg transition-all active:scale-95"
-                          title="Copiar número de cuenta"
-                        >
-                          <DocumentDuplicateIcon className="w-5 h-5" />
-                        </button>
-                        {copiedBancos && <span className="ml-3 text-sm text-green-400 font-medium">¡Copiado!</span>}
-                      </div>
-                      <p className="text-xs mt-2 text-gray-300">Escanea este codigo QR o copia esta llave para realizar transferencias desde cualquier banco en Colombia. Una vez realizada la transferencia, enviar el comprobante haciendo click en &apos;Contacto&apos;. si requieres cantidades mayores, hacer click primero en &apos;Contacto&apos;</p>
-                    </div>
-                  )}
-
-                  <button
-                    onClick={() => setSavingsOption('btcLightning')}
-                    className={`px-4 py-2 rounded ${savingsOption === 'btcLightning' ? 'bg-blue-600' : 'bg-gray-600'
-                      } text-white hover:bg-blue-700 transition-colors`}
-                  >
-                    BTC Lightning
-                  </button>
-                  {savingsOption === 'btcLightning' && (
-                    <div className="mt-4">
-                      <h3 className="text-lg font-semibold mb-2 text-center">Savings (BTC Lightning)</h3>
-                      <input
-                        type="number"
-                        value={savingsAmount}
-                        onChange={(e) => setSavingsAmount(parseInt(e.target.value) || 1000)}
-                        placeholder="Amount (sat)"
-                        className="w-full p-2 bg-gray-600 rounded text-white mb-2"
-                      />
-                      <button
-                        onClick={generateSavingsInvoice}
-                        disabled={savingsAmount <= 0 || savingsPaymentStatus === 'pending'}
-                        className="w-full px-4 py-2 bg-blue-600 rounded mb-4 disabled:bg-gray-500"
-                        title={savingsAmount <= 0 ? 'Enter an amount greater than 0' : savingsPaymentStatus === 'pending' ? 'Waiting for payment' : ''}
-                      >
-                        Generate Savings Invoice
-                      </button>
-                      {savingsLoading && (
-                        <div className="flex justify-center mt-4"></div>
-                      )}
-                      {isClient && savingsBolt11 && (
-                        <div className="text-center">
-                          <QRCodeCanvas value={savingsBolt11} size={128} className="mx-auto" />
-                          <p className="mt-2">Scan to save {savingsAmount} sats</p>
-                          <p className="mt-4 text-sm text-gray-300 break-all px-4">
-                            Payment Request: {savingsBolt11}
-                          </p>
-                          <button
-                            onClick={handleCopySavingsRequest}
-                            className="mt-2 px-4 py-2 bg-gray-600 rounded text-white hover:bg-gray-700 transition-colors"
-                          >
-                            {copySavingsButtonText}
-                          </button>
-                        </div>
-                      )}
-                      {savingsPaymentStatus === 'pending' && <p className="text-yellow-400 mt-2">Payment pending...</p>}
-                      {savingsPaymentStatus === 'settled' && <p className="text-green-400 mt-2">Payment received! Thank you.</p>}
-                      {savingsPaymentStatus === 'settled' && (
-                        <button
-                          onClick={resetSavings}
-                          className="w-full mt-2 px-4 py-2 bg-gray-600 rounded text-white hover:bg-gray-700"
-                        >
-                          Create New Savings Invoice
-                        </button>
-                      )}
-                      {savingsError && <p className="text-red-400 mt-2">{savingsError}</p>}
-                    </div>
-                  )}
                   <button
                     onClick={() => setSavingsOption('bancosEuropa')}
                     className={`px-4 py-2 rounded ${savingsOption === 'bancosEuropa' ? 'bg-blue-600' : 'bg-gray-600'
@@ -2492,58 +2559,60 @@ export default function Home() {
               </button>
             </div>
             <div className="overflow-y-auto pr-2 space-y-4 flex-1">
-              {user?.uid === '5XgksHrgmyeGqqKFYGVjQVM0KGl1' ? (
-                // Admin View
-                allAdminDeposits.length > 0 ? allAdminDeposits.map((dep, idx) => (
-                  <div key={idx} className="bg-white/5 p-4 rounded-xl border border-white/10">
-                    <p className="text-sm text-gray-400 mb-1">{new Date(dep.timestamp || 0).toLocaleString()}</p>
-                    <p className="text-white font-medium">Deposito de {dep.parsedName}</p>
-                    <p className="text-green-400 font-bold">${Number(String(dep.amount).replace(/,/g, '')).toLocaleString('de-DE')} <span className="text-xs text-gray-500">[{dep.status}]</span></p>
-                    {dep.marketBuy && (
-                      <div className="mt-2 text-xs bg-black/20 p-2 rounded">
-                        <p className="text-gray-300">Market Buy: {dep.marketBuy.btcBought} BTC</p>
-                        {dep.marketBuy.btcUsdtPrice && <p className="text-gray-400">BTC/USDT: ${dep.marketBuy.btcUsdtPrice}</p>}
-                        {dep.marketBuy.usdtCopPrice && <p className="text-gray-400">USDT/COP: ${dep.marketBuy.usdtCopPrice}</p>}
-                      </div>
-                    )}
-                  </div>
-                )) : <p className="text-gray-400 text-center py-4">No hay notificaciones históricas.</p>
-              ) : (
-                // User View
-                [...allUserDeposits, ...allUserWithdrawals]
-                  .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
-                  .map((item, idx) => (
-                    <div key={idx} className="bg-white/5 p-4 rounded-xl border border-white/10">
-                      <p className="text-sm text-gray-400 mb-1">{new Date(item.timestamp || 0).toLocaleString()}</p>
-                      {'parsedName' in item ? (
-                        <>
-                          <p className="text-white font-medium">Deposito Recibido</p>
-                          <p className="text-green-400 font-bold">${item.saldoCop ? item.saldoCop.toLocaleString('de-DE') : Number(String(item.amount).replace(/,/g, '')).toLocaleString('de-DE')} <span className="text-xs text-gray-500">[{item.status}]</span></p>
-                          {'marketBuy' in item && item.marketBuy && (
-                            <div className="mt-2 text-xs bg-black/20 p-2 rounded">
-                              <p className="text-gray-300">Market Buy: {item.marketBuy.btcBought} BTC</p>
-                              {item.marketBuy.btcUsdtPrice && <p className="text-gray-400">BTC/USDT: ${item.marketBuy.btcUsdtPrice}</p>}
-                              {item.marketBuy.usdtCopPrice && <p className="text-gray-400">USDT/COP: ${item.marketBuy.usdtCopPrice}</p>}
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        <>
-                          <p className="text-white font-medium">Retiro a {item.bankName || 'Bitcoin'}</p>
-                          <p className="text-red-400 font-bold">${item.saldoCop ? item.saldoCop.toLocaleString('de-DE') : Number(String(item.amount).replace(/,/g, '')).toLocaleString('de-DE')} <span className="text-xs text-gray-500">[{item.status}]</span></p>
-                          {'receipt' in item && item.receipt && (
-                            <div className="mt-2 text-xs bg-black/20 p-2 rounded">
-                              {item.receipt.btcUsdt && <p className="text-gray-400">BTC/USDT: ${item.receipt.btcUsdt}</p>}
-                              {item.receipt.usdtCop && <p className="text-gray-400">USDT/COP: ${item.receipt.usdtCop}</p>}
-                            </div>
-                          )}
-                        </>
+              {user?.uid === '5XgksHrgmyeGqqKFYGVjQVM0KGl1' && (
+                <>
+                  <h3 className="text-lg font-bold text-white mt-2 mb-2">Notificaciones del Sistema</h3>
+                  {allAdminDeposits.length > 0 ? allAdminDeposits.map((dep, idx) => (
+                    <div key={`admin-${idx}`} className="bg-white/5 p-4 rounded-xl border border-white/10">
+                      <p className="text-sm text-gray-400 mb-1">{new Date(dep.timestamp || 0).toLocaleString()}</p>
+                      <p className="text-white font-medium">Deposito de {dep.parsedName}</p>
+                      <p className="text-green-400 font-bold">${Number(String(dep.amount).replace(/,/g, '')).toLocaleString('de-DE')} <span className="text-xs text-gray-500">[{dep.status}]</span></p>
+                      {dep.marketBuy && (
+                        <div className="mt-2 text-xs bg-black/20 p-2 rounded">
+                          <p className="text-gray-300">Market Buy: {dep.marketBuy.btcBought} BTC</p>
+                          {dep.marketBuy.btcUsdtPrice && <p className="text-gray-400">BTC/USDT: ${dep.marketBuy.btcUsdtPrice}</p>}
+                          {dep.marketBuy.usdtCopPrice && <p className="text-gray-400">USDT/COP: ${dep.marketBuy.usdtCopPrice}</p>}
+                        </div>
                       )}
                     </div>
-                  ))
+                  )) : <p className="text-gray-400 text-center py-4">No hay notificaciones del sistema.</p>}
+                  <h3 className="text-lg font-bold text-white mt-6 mb-2">Mis Movimientos</h3>
+                </>
               )}
-              {user?.uid !== '5XgksHrgmyeGqqKFYGVjQVM0KGl1' && [...allUserDeposits, ...allUserWithdrawals].length === 0 && (
-                <p className="text-gray-400 text-center py-4">No hay notificaciones históricas.</p>
+
+              {[...allUserDeposits, ...allUserWithdrawals]
+                .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+                .map((item, idx) => (
+                  <div key={`user-${idx}`} className="bg-white/5 p-4 rounded-xl border border-white/10">
+                    <p className="text-sm text-gray-400 mb-1">{new Date(item.timestamp || 0).toLocaleString()}</p>
+                    {'parsedName' in item ? (
+                      <>
+                        <p className="text-white font-medium">Deposito Recibido</p>
+                        <p className="text-green-400 font-bold">${item.saldoCop ? item.saldoCop.toLocaleString('de-DE') : Number(String(item.amount).replace(/,/g, '')).toLocaleString('de-DE')} <span className="text-xs text-gray-500">[{item.status}]</span></p>
+                        {'marketBuy' in item && item.marketBuy && (
+                          <div className="mt-2 text-xs bg-black/20 p-2 rounded">
+                            <p className="text-gray-300">Market Buy: {item.marketBuy.btcBought} BTC</p>
+                            {item.marketBuy.btcUsdtPrice && <p className="text-gray-400">BTC/USDT: ${item.marketBuy.btcUsdtPrice}</p>}
+                            {item.marketBuy.usdtCopPrice && <p className="text-gray-400">USDT/COP: ${item.marketBuy.usdtCopPrice}</p>}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-white font-medium">Retiro a {item.bankName || 'Bitcoin'}</p>
+                        <p className="text-red-400 font-bold">${item.saldoCop ? item.saldoCop.toLocaleString('de-DE') : Number(String(item.amount).replace(/,/g, '')).toLocaleString('de-DE')} <span className="text-xs text-gray-500">[{item.status}]</span></p>
+                        {'receipt' in item && item.receipt && (
+                          <div className="mt-2 text-xs bg-black/20 p-2 rounded">
+                            {item.receipt.btcUsdt && <p className="text-gray-400">BTC/USDT: ${item.receipt.btcUsdt}</p>}
+                            {item.receipt.usdtCop && <p className="text-gray-400">USDT/COP: ${item.receipt.usdtCop}</p>}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                ))}
+              {[...allUserDeposits, ...allUserWithdrawals].length === 0 && (
+                <p className="text-gray-400 text-center py-4">No hay movimientos personales.</p>
               )}
             </div>
           </div>
