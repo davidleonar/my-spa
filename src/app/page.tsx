@@ -182,6 +182,7 @@ export default function Home() {
   // States for COP Depositos and Retiros
   const [showCopDepositos, setShowCopDepositos] = useState<boolean>(false);
   const [showCopRetiros, setShowCopRetiros] = useState<boolean>(false);
+  const [showBtcLightningWithdrawal, setShowBtcLightningWithdrawal] = useState<boolean>(false);
   const [copRetirosAmount, setCopRetirosAmount] = useState<string>('');
   const [copRetirosBtcAmount, setCopRetirosBtcAmount] = useState<string>('');
   const [copRetirosBreBKey, setCopRetirosBreBKey] = useState<string>('');
@@ -1316,33 +1317,81 @@ export default function Home() {
   };
 
   const handleConfirmPayment = async () => {
+    if (!user?.uid) {
+      setScannerError('Debe iniciar sesión para realizar un retiro.');
+      return;
+    }
+    if (!withdrawalQuote || !withdrawalBolt11) {
+      setScannerError('No hay cotización activa.');
+      return;
+    }
+
+    const totalBtcToDeduct = withdrawalQuote.totalSats / 100000000;
+
+    // Pre-flight balance check
+    if (totalBtcToDeduct > syncBtcBalance) {
+      alert(`Saldo de BTC insuficiente. Tu saldo es ${syncBtcBalance} BTC, pero este retiro requiere ${totalBtcToDeduct} BTC (monto + comisiones).`);
+      return;
+    }
+
+    const isConfirmed = window.confirm(`¿Estás seguro de que deseas enviar esta solicitud de retiro de ${withdrawalQuote.amountSats.toLocaleString('de-DE')} sats? Se deducirán ${totalBtcToDeduct.toFixed(8)} BTC de tu saldo.`);
+    if (!isConfirmed) {
+      return;
+    }
+
     setWithdrawalPaymentStatus('pending');
+    setScannerError(null);
     try {
       const payRes = await fetch('/api/lndProxy/v1/channels/transactions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ payment_request: withdrawalBolt11 }),
       });
-      if (!payRes.ok) throw new Error('Payment failed');
 
-      const decoded = bolt11Lib.decode(withdrawalBolt11!);
-      const hexHash = decoded.tagsObject.payment_hash;
-      if (!hexHash) {
-        throw new Error('Invalid invoice: Missing payment hash'); // Fail early with user-friendly error
-      }
-      const base64Hash = Buffer.from(hexHash, 'hex').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); // URL-safe
-
-      console.log('Payment sent, payment_hash:', hexHash);
-      console.log('Base64 payment_hash for lookup:', base64Hash);
-
-      if (payRes.ok) { // SETTLED (Lightning Docs)
-        setWithdrawalPaymentStatus('success');
-        clearInterval(5);
+      if (!payRes.ok) {
+        const text = await payRes.text();
+        throw new Error(text || 'Error al procesar el pago.');
       }
 
-      setTimeout(() => clearInterval(5), 60000); // Timeout
+      const payData = await payRes.json();
+      console.log('LND payment data:', payData);
+
+      if (payData.payment_error) {
+        throw new Error(payData.payment_error);
+      }
+
+      // Success!
+      const requestedBtc = withdrawalQuote.amountSats / 100000000;
+      const fee = (withdrawalQuote.baseFee + withdrawalQuote.partnerFee) / 100000000;
+
+      const withdrawalData: Omit<BankWithdrawal, 'requestId'> = {
+        uid: user.uid,
+        userEmail: user.email || 'email',
+        name: user.displayName || 'Unknown',
+        amount: withdrawalQuote.amountSats, // number of sats
+        requestedBtcAmount: requestedBtc,
+        fee: fee,
+        totalBtcToDeduct: totalBtcToDeduct,
+        bankData: withdrawalBolt11,
+        bankName: 'Bitcoin Lightning',
+        option: 'btcLightning',
+        timestamp: Date.now(),
+        status: 'settled',
+        receipt: {
+          btcUsdt: liveBtcUsdt || 0,
+          usdtCop: liveUsdtCop || 0
+        }
+      };
+
+      const refPath = `withdrawals/${user.uid}`;
+      const newRef = push(ref(database, refPath));
+      await set(newRef, withdrawalData);
+
+      setWithdrawalPaymentStatus('success');
+
     } catch (err) {
       setWithdrawalPaymentStatus('failure');
+      setScannerError(err instanceof Error ? err.message : 'Payment failed');
       console.error('Payment error:', err);
     }
   };
@@ -1905,6 +1954,192 @@ export default function Home() {
               )}
             </div>
 
+            <div className="mb-8 w-full">
+              <button
+                onClick={() => setShowBtcLightningWithdrawal(!showBtcLightningWithdrawal)}
+                className="w-full px-4 py-4 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 rounded-2xl text-white font-bold text-lg shadow-[0_4px_20px_rgba(245,158,11,0.4)] transition-all active:scale-[0.98] flex items-center justify-center gap-2 border border-yellow-400/30"
+              >
+                <span>Retiro BTC Lightning</span>
+                <span className="text-2xl" title="thunder icon">⚡</span>
+              </button>
+
+              {showBtcLightningWithdrawal && (
+                <div className="mt-4 bg-black/40 border border-surface-border p-6 rounded-2xl shadow-lg backdrop-blur-sm animate-fade-in text-left">
+                  <h3 className="text-xl font-bold mb-4 text-white flex items-center gap-2">
+                    <span className="text-yellow-400">⚡ Retiro BTC Lightning</span>
+                  </h3>
+                  
+                  {withdrawalPaymentStatus === 'success' ? (
+                    <div className="bg-green-500/20 border border-green-500/50 p-6 rounded-xl text-center animate-fade-in shadow-[0_0_20px_rgba(34,197,94,0.3)] relative overflow-hidden">
+                      {/* Premium CSS glowing ring animation */}
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <div className="w-24 h-24 rounded-full border border-green-500/30 animate-ping duration-1000 opacity-75"></div>
+                        <div className="w-16 h-16 rounded-full border border-green-400/50 animate-pulse opacity-50"></div>
+                      </div>
+                      
+                      <div className="relative z-10">
+                        <div className="text-5xl mb-4 animate-bounce">🎉</div>
+                        <h4 className="text-2xl font-bold text-green-400 mb-2">¡Retiro Exitoso!</h4>
+                        <p className="text-green-100 mb-4">El pago Lightning se ha liquidado y tu saldo ha sido actualizado.</p>
+                        <button 
+                          onClick={resetWithdrawal}
+                          className="px-6 py-2 bg-green-600 hover:bg-green-500 text-white font-bold rounded-xl transition-all active:scale-95 shadow-md"
+                        >
+                          Entendido
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="text-xs text-yellow-400 mb-4 bg-yellow-400/10 p-3 rounded-xl border border-yellow-400/20 flex flex-col gap-1">
+                        <div className="flex justify-between items-center">
+                          <span>Tu Saldo BTC Autorizado:</span>
+                          <strong className="text-white text-sm">{syncBtcBalance.toFixed(8)} BTC</strong>
+                        </div>
+                        <div className="flex justify-between items-center text-[10px] text-gray-400">
+                          <span>Equivalente en Satoshis:</span>
+                          <span>{(syncBtcBalance * 100000000).toLocaleString('de-DE')} sats</span>
+                        </div>
+                      </div>
+
+                      {/* QR Scanner view option - Always mounted to avoid React removeChild Virtual DOM conflicts */}
+                      <div className={`mb-4 bg-white/5 border border-surface-border p-4 rounded-xl text-center backdrop-blur-md ${showScanner ? 'block' : 'hidden'}`}>
+                        <div className="flex justify-between items-center mb-3">
+                          <span className="text-sm font-semibold text-white">Escanea Código QR</span>
+                          <button
+                            onClick={() => setShowScanner(false)}
+                            className="text-gray-400 hover:text-white text-xs font-bold bg-white/10 px-2 py-1 rounded"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                        <div className="overflow-hidden rounded-xl border border-gray-700 bg-black">
+                          <QrScanner 
+                            active={showScanner}
+                            onScanSuccess={(text) => {
+                              handleBolt11(text);
+                              setShowScanner(false);
+                            }}
+                            onScanError={(err) => setScannerError(err)}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Factura input and control buttons */}
+                      {!showScanner && (
+                        <div className="mb-4 flex flex-col gap-3">
+                          <label className="block text-sm font-medium text-gray-300">Factura Lightning (BOLT11)</label>
+                          <input
+                            type="text"
+                            value={withdrawalBolt11 || ''}
+                            onChange={(e) => handleBolt11(e.target.value)}
+                            placeholder="Pega tu factura ln..."
+                            className="w-full p-3 bg-gray-900/80 border border-gray-700 rounded-xl text-white focus:ring-2 focus:ring-yellow-500 outline-none text-sm"
+                          />
+                          <div className="grid grid-cols-2 gap-3">
+                            <button
+                              onClick={handlePasteFromClipboard}
+                              className="w-full py-3 bg-yellow-500/20 hover:bg-yellow-500/30 active:bg-yellow-500/40 text-yellow-400 rounded-xl transition-all active:scale-[0.98] text-sm font-bold flex items-center justify-center gap-2 border border-yellow-500/30 shadow-md"
+                              title="Pegar desde Portapapeles"
+                            >
+                              <span>📋</span>
+                              <span>Pegar Factura</span>
+                            </button>
+                            <button
+                              onClick={() => {
+                                setScannerError(null);
+                                setShowScanner(true);
+                              }}
+                              className="w-full py-3 bg-orange-500/20 hover:bg-orange-500/30 active:bg-orange-500/40 text-orange-400 rounded-xl transition-all active:scale-[0.98] text-sm font-bold flex items-center justify-center gap-2 border border-orange-500/30 shadow-md"
+                              title="Escanear QR"
+                            >
+                              <span>📸</span>
+                              <span>Escanear QR</span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Display Quote Details if available */}
+                      {withdrawalQuote && (
+                        <div className="mb-6 p-4 bg-white/5 border border-surface-border rounded-xl backdrop-blur-md space-y-3 animate-fade-in text-sm text-gray-300">
+                          <h4 className="font-bold text-white text-base border-b border-white/10 pb-2 mb-2 flex items-center justify-between">
+                            <span>Resumen de Retiro</span>
+                            <span className="text-yellow-400 font-semibold">{withdrawalQuote.amountSats.toLocaleString('de-DE')} sats</span>
+                          </h4>
+                          
+                          <div className="flex justify-between">
+                            <span>Monto a Retirar:</span>
+                            <span className="text-white">{(withdrawalQuote.amountSats / 100000000).toFixed(8)} BTC</span>
+                          </div>
+                          
+                          <div className="flex justify-between">
+                            <span>Comisión de Red (LND):</span>
+                            <span className="text-white">{(withdrawalQuote.partnerFee / 100000000).toFixed(8)} BTC</span>
+                          </div>
+                          
+                          <div className="flex justify-between">
+                            <span>Comisión de la Plataforma:</span>
+                            <span className="text-white">{(withdrawalQuote.baseFee / 100000000).toFixed(8)} BTC</span>
+                          </div>
+                          
+                          <div className="flex justify-between border-t border-white/10 pt-2 font-bold text-white text-base">
+                            <span>Total a Deducir:</span>
+                            <span className="text-yellow-400">{(withdrawalQuote.totalSats / 100000000).toFixed(8)} BTC</span>
+                          </div>
+
+                          {/* Live balance sufficiency check inside the card */}
+                          {syncBtcBalance < (withdrawalQuote.totalSats / 100000000) ? (
+                            <div className="mt-3 p-3 bg-red-500/20 border border-red-500/50 rounded-xl text-red-400 font-medium flex flex-col gap-1 text-xs">
+                              <span>⚠️ Fondos Insuficientes</span>
+                              <span>Necesitas {(withdrawalQuote.totalSats / 100000000).toFixed(8)} BTC, pero tu saldo es de {syncBtcBalance.toFixed(8)} BTC.</span>
+                            </div>
+                          ) : (
+                            <div className="mt-3 p-3 bg-green-500/10 border border-green-500/30 rounded-xl text-green-400 font-medium text-xs">
+                              ✓ Saldo suficiente para cubrir este retiro.
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Action buttons */}
+                      {withdrawalQuote && (
+                        <div className="flex gap-3">
+                          <button
+                            onClick={handleConfirmPayment}
+                            disabled={syncBtcBalance < (withdrawalQuote.totalSats / 100000000) || withdrawalPaymentStatus === 'pending'}
+                            className="flex-1 px-4 py-3 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-400 hover:to-orange-400 disabled:from-gray-700 disabled:to-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed rounded-xl text-white font-bold transition-all shadow-lg text-center flex items-center justify-center gap-2"
+                          >
+                            {withdrawalPaymentStatus === 'pending' ? (
+                              <>
+                                <div className="w-5 h-5 border-2 border-t-white border-gray-400 rounded-full animate-spin"></div>
+                                <span>Procesando Pago...</span>
+                              </>
+                            ) : (
+                              <span>Confirmar y Enviar Pago</span>
+                            )}
+                          </button>
+                          
+                          <button
+                            onClick={resetWithdrawal}
+                            className="px-4 py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl transition-all font-semibold"
+                          >
+                            Reiniciar
+                          </button>
+                        </div>
+                      )}
+
+                      {scannerError && (
+                        <div className="mt-4 p-3 bg-red-500/15 border border-red-500/30 rounded-xl text-center text-xs text-red-400">
+                          {scannerError}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
             <h1 className="text-2xl font-bold mb-4 text-center">Saldos de Inversión</h1>
             <form onSubmit={handleSubmit} className="flex items-center space-x-2 mb-4">
               <input
@@ -2278,59 +2513,7 @@ export default function Home() {
                       <p className="text-xs mt-2 text-gray-400">1% comision de retiro. 1 a 3 dias hábiles</p>
                     </div>
                   )}
-                  <button
-                    onClick={() => setWithdrawalOption('btcLightning')}
-                    className={`px-4 py-2 rounded ${withdrawalOption === 'btcLightning' ? 'bg-blue-600' : 'bg-gray-600'
-                      } text-white hover:bg-blue-700 transition-colors`}
-                  >
-                    BTC Lightning Wallet
-                  </button>
-                  {withdrawalOption === 'btcLightning' && (
-                    <div className="mt-4">
-                      {!showScanner && (
-                        <button onClick={() => setShowScanner(true)} className="w-full px-4 py-2 bg-purple-600 rounded text-white mb-2">
-                          Scan QR Code
-                        </button>
-                      )}
-                      {showScanner && (
-                        <QrScanner
-                          onScanSuccess={(text) => {
-                            handleBolt11(text);
-                            setShowScanner(false);
-                          }}
-                          onScanError={(err) => setScannerError(err)}
-                        />
-                      )}
-                      <button onClick={handlePasteFromClipboard} className="text-xs underline text-gray-400 w-full px-4 py-2 rounded text-white">
-                        Paste from Clipboard
-                      </button>
-                      {withdrawalQuote && (
-                        <div className="text-xs bg-gray-700 p-4 rounded mb-4">
-                          <p>Amount: {withdrawalQuote.amountSats} sats</p>
-                          <p>Base Fee: {withdrawalQuote.baseFee} sats</p>
-                          <p>Partner Fee: {withdrawalQuote.partnerFee} sats</p>
-                          <p>Total: {withdrawalQuote.totalSats} sats</p>
-                          {/* Only show Confirm button for admin user */}
-                          {user?.uid === '5XgksHrgmyeGqqKFYGVjQVM0KGl1' && (
-                            <button
-                              onClick={handleConfirmPayment}
-                              disabled={withdrawalPaymentStatus === 'pending' || withdrawalPaymentStatus === 'success'}
-                              className="text-m w-full mt-2 px-4 py-2 bg-green-600 rounded text-white disabled:bg-gray-500"
-                            >
-                              Confirm
-                            </button>
-                          )}
-                        </div>
-                      )}
-                      {withdrawalPaymentStatus === 'pending' && <p className="text-yellow-400">Processing...</p>}
-                      {withdrawalPaymentStatus === 'success' && <p className="text-green-400">Success!</p>}
-                      {withdrawalPaymentStatus === 'failure' && <p className="text-red-400">Failed. Retry.</p>}
-                      {(withdrawalPaymentStatus === 'success' || withdrawalPaymentStatus === 'failure') && (
-                        <button onClick={resetWithdrawal} className="mt-2 px-4 py-2 bg-gray-600 rounded">Scan Again</button>
-                      )}
-                      {scannerError && <p className="text-red-400">{scannerError}</p>}
-                    </div>
-                  )}
+
                   <button
                     onClick={() => setWithdrawalOption('usdtWallet')}
                     className={`px-4 py-2 rounded ${withdrawalOption === 'usdtWallet' ? 'bg-blue-600' : 'bg-gray-600'
