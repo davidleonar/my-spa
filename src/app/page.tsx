@@ -1363,12 +1363,13 @@ export default function Home() {
       // Success!
       const requestedBtc = withdrawalQuote.amountSats / 100000000;
       const fee = (withdrawalQuote.baseFee + withdrawalQuote.partnerFee) / 100000000;
+      const copEquivalent = Math.round(requestedBtc * (liveBtcUsdt || 0) * (liveUsdtCop || 0));
 
       const withdrawalData: Omit<BankWithdrawal, 'requestId'> = {
         uid: user.uid,
         userEmail: user.email || 'email',
         name: user.displayName || 'Unknown',
-        amount: withdrawalQuote.amountSats, // number of sats
+        amount: copEquivalent, // COP equivalent of satoshis
         requestedBtcAmount: requestedBtc,
         fee: fee,
         totalBtcToDeduct: totalBtcToDeduct,

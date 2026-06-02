@@ -33,6 +33,19 @@ interface TransactionItem {
   requestedBtcAmount?: number;
   fee?: number;
   option?: string;
+  marketBuy?: {
+    btcBought: number;
+    usdtSpent: number;
+    orderId: number | string;
+    usdtCopPrice?: number;
+    btcUsdtPrice?: number;
+    priceSource?: string;
+  };
+  receipt?: {
+    btcUsdt?: number;
+    usdtCop?: number;
+    totalCop?: number;
+  };
 }
 
 export default function AdminDashboard() {
@@ -166,7 +179,8 @@ export default function AdminDashboard() {
               time: d.time || "N/A",
               timestamp: d.timestamp || 0,
               status: d.status || "pending",
-              btcBought: d.marketBuy?.btcBought || d.btcBought || 0
+              btcBought: d.marketBuy?.btcBought || d.btcBought || 0,
+              marketBuy: d.marketBuy || undefined
             });
           }
         }
@@ -192,7 +206,8 @@ export default function AdminDashboard() {
                 status: w.status || "pending",
                 requestedBtcAmount: w.requestedBtcAmount || 0,
                 fee: w.fee || 0,
-                option: w.option || "N/A"
+                option: w.option || "N/A",
+                receipt: w.receipt || undefined
               });
             }
           }
@@ -564,7 +579,10 @@ export default function AdminDashboard() {
                     <span className="text-xs text-gray-400 uppercase font-medium">Avg Purchase Price</span>
                     <span className="text-lg font-bold font-mono text-white">
                       {selectedUser.avgBuyPrice && selectedUser.avgBuyPrice > 0
-                        ? `$${selectedUser.avgBuyPrice.toLocaleString('de-DE')} COP/BTC`
+                        ? (usdtCop 
+                            ? `$${Math.round(selectedUser.avgBuyPrice / usdtCop).toLocaleString()} USDT`
+                            : "Calculating..."
+                          )
                         : "N/A"
                       }
                     </span>
@@ -598,7 +616,6 @@ export default function AdminDashboard() {
                 {/* Historical Metrics Table */}
                 <div className="mt-4 pt-4 border-t border-white/5 flex justify-between text-xs text-gray-400 font-mono">
                   <span>Total Invested: <span className="text-white">${(selectedUser.totalCopInvested ?? 0).toLocaleString('de-DE')} COP</span></span>
-                  <span>Registered Yield: <span className="text-green-400 font-bold">{selectedUser.Rendimiento}</span></span>
                 </div>
 
                 {/* View Transactions Toggle and List */}
@@ -657,8 +674,87 @@ export default function AdminDashboard() {
                             </div>
                           )}
 
+                          {/* Deposits with market buy receipt */}
+                          {tx.type === 'deposit' && tx.marketBuy && (
+                            <div className="mt-2 text-[10px] bg-black/20 p-2 rounded-lg border border-white/5 flex flex-col gap-1 text-gray-400 font-mono">
+                              <div className="flex justify-between border-b border-white/5 pb-1 mb-1">
+                                <span className="text-gray-300 font-semibold">Market Buy Transaction:</span>
+                                <span className="text-emerald-400 font-bold">{tx.marketBuy.btcBought} BTC</span>
+                              </div>
+                              {tx.amount && parseFloat(tx.amount.toString()) > 0 && (
+                                <div className="flex justify-between text-white">
+                                  <span className="text-gray-300">Amount:</span>
+                                  <span>${parseFloat(tx.amount.toString()).toLocaleString('de-DE')} COP</span>
+                                </div>
+                              )}
+                              {tx.marketBuy.usdtSpent !== undefined && (
+                                <div className="flex justify-between">
+                                  <span>USDT spent:</span>
+                                  <span className="text-gray-200">${tx.marketBuy.usdtSpent.toFixed(2)} USDT</span>
+                                </div>
+                              )}
+                              {tx.marketBuy.btcUsdtPrice && (
+                                <div className="flex justify-between">
+                                  <span>BTC/USDT rate:</span>
+                                  <span className="text-gray-200">${tx.marketBuy.btcUsdtPrice.toLocaleString()}</span>
+                                </div>
+                              )}
+                              {tx.marketBuy.usdtCopPrice && (
+                                <div className="flex justify-between">
+                                  <span>USDT/COP rate:</span>
+                                  <span className="text-gray-200">${tx.marketBuy.usdtCopPrice.toLocaleString()} COP</span>
+                                </div>
+                              )}
+                              {tx.marketBuy.priceSource && (
+                                <div className="flex justify-between text-[9px] text-gray-500 mt-0.5 border-t border-white/5 pt-1">
+                                  <span>Source:</span>
+                                  <span>{tx.marketBuy.priceSource}</span>
+                                </div>
+                              )}
+                              {tx.marketBuy.orderId && (
+                                <div className="flex justify-between text-[9px] text-gray-500">
+                                  <span>Binance Order ID:</span>
+                                  <span>{tx.marketBuy.orderId}</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Withdrawals with receipt */}
+                          {tx.type === 'withdrawal' && tx.receipt && (
+                            <div className="mt-2 text-[10px] bg-black/20 p-2 rounded-lg border border-white/5 flex flex-col gap-1 text-gray-400 font-mono">
+                              <div className="flex justify-between border-b border-white/5 pb-1 mb-1">
+                                <span className="text-gray-300 font-semibold">Withdrawal Receipt:</span>
+                                <span className="text-white">Settled</span>
+                              </div>
+                              {tx.amount && parseFloat(tx.amount.toString()) > 0 && (
+                                <div className="flex justify-between text-white">
+                                  <span className="text-gray-300">Amount:</span>
+                                  <span>${parseFloat(tx.amount.toString()).toLocaleString('de-DE')} COP</span>
+                                </div>
+                              )}
+                              {tx.receipt.btcUsdt && (
+                                <div className="flex justify-between">
+                                  <span>BTC/USDT quote:</span>
+                                  <span className="text-gray-200">${tx.receipt.btcUsdt.toLocaleString()}</span>
+                                </div>
+                              )}
+                              {tx.receipt.usdtCop && (
+                                <div className="flex justify-between">
+                                  <span>USDT/COP quote:</span>
+                                  <span className="text-gray-200">${tx.receipt.usdtCop.toLocaleString()} COP</span>
+                                </div>
+                              )}
+                              {tx.receipt.totalCop && (
+                                <div className="flex justify-between">
+                                  <span>Total COP value:</span>
+                                  <span className="text-emerald-400 font-bold">${tx.receipt.totalCop.toLocaleString()} COP</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
                           <div className="flex justify-between items-center text-[10px] text-gray-400 border-t border-white/5 pt-2 mt-1">
-                            <span>Order / Ref ID: <span className="font-mono text-gray-300">{tx.id.substring(0, 12)}...</span></span>
+                            <span>Order / Ref ID: <span className="font-mono text-gray-300 select-all">{tx.id}</span></span>
                             <span className={`font-semibold uppercase ${
                               tx.status === 'settled' || tx.status === 'success' ? 'text-green-400' : 'text-yellow-500'
                             }`}>{tx.status}</span>
@@ -712,6 +808,94 @@ export default function AdminDashboard() {
                         }
                       </span>
                     </div>
+
+                    {/* Extra details on fee if it exists */}
+                    {tx.type === 'withdrawal' && tx.fee && tx.fee > 0 && (
+                      <div className="text-[10px] text-gray-400 font-mono flex justify-between bg-white/[0.02] p-1.5 rounded">
+                        <span>Fee Deducted:</span>
+                        <span className="text-yellow-400 font-bold">{tx.fee.toFixed(8)} BTC</span>
+                      </div>
+                    )}
+
+                    {/* Deposits with market buy receipt */}
+                    {tx.type === 'deposit' && tx.marketBuy && (
+                      <div className="mt-2 text-[10px] bg-black/20 p-2 rounded-lg border border-white/5 flex flex-col gap-1 text-gray-400 font-mono">
+                        <div className="flex justify-between border-b border-white/5 pb-1 mb-1">
+                          <span className="text-gray-300 font-semibold">Market Buy Transaction:</span>
+                          <span className="text-emerald-400 font-bold">{tx.marketBuy.btcBought} BTC</span>
+                        </div>
+                        {tx.amount && parseFloat(tx.amount.toString()) > 0 && (
+                          <div className="flex justify-between text-white">
+                            <span className="text-gray-300">Amount:</span>
+                            <span>${parseFloat(tx.amount.toString()).toLocaleString('de-DE')} COP</span>
+                          </div>
+                        )}
+                        {tx.marketBuy.usdtSpent !== undefined && (
+                          <div className="flex justify-between">
+                            <span>USDT spent:</span>
+                            <span className="text-gray-200">${tx.marketBuy.usdtSpent.toFixed(2)} USDT</span>
+                          </div>
+                        )}
+                        {tx.marketBuy.btcUsdtPrice && (
+                          <div className="flex justify-between">
+                            <span>BTC/USDT rate:</span>
+                            <span className="text-gray-200">${tx.marketBuy.btcUsdtPrice.toLocaleString()}</span>
+                          </div>
+                        )}
+                        {tx.marketBuy.usdtCopPrice && (
+                          <div className="flex justify-between">
+                            <span>USDT/COP rate:</span>
+                            <span className="text-gray-200">${tx.marketBuy.usdtCopPrice.toLocaleString()} COP</span>
+                          </div>
+                        )}
+                        {tx.marketBuy.priceSource && (
+                          <div className="flex justify-between text-[9px] text-gray-500 mt-0.5 border-t border-white/5 pt-1">
+                            <span>Source:</span>
+                            <span>{tx.marketBuy.priceSource}</span>
+                          </div>
+                        )}
+                        {tx.marketBuy.orderId && (
+                          <div className="flex justify-between text-[9px] text-gray-500">
+                            <span>Binance Order ID:</span>
+                            <span>{tx.marketBuy.orderId}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Withdrawals with receipt */}
+                    {tx.type === 'withdrawal' && tx.receipt && (
+                      <div className="mt-2 text-[10px] bg-black/20 p-2 rounded-lg border border-white/5 flex flex-col gap-1 text-gray-400 font-mono">
+                        <div className="flex justify-between border-b border-white/5 pb-1 mb-1">
+                          <span className="text-gray-300 font-semibold">Withdrawal Receipt:</span>
+                          <span className="text-white">Settled</span>
+                        </div>
+                        {tx.amount && parseFloat(tx.amount.toString()) > 0 && (
+                          <div className="flex justify-between text-white">
+                            <span className="text-gray-300">Amount:</span>
+                            <span>${parseFloat(tx.amount.toString()).toLocaleString('de-DE')} COP</span>
+                          </div>
+                        )}
+                        {tx.receipt.btcUsdt && (
+                          <div className="flex justify-between">
+                            <span>BTC/USDT quote:</span>
+                            <span className="text-gray-200">${tx.receipt.btcUsdt.toLocaleString()}</span>
+                          </div>
+                        )}
+                        {tx.receipt.usdtCop && (
+                          <div className="flex justify-between">
+                            <span>USDT/COP quote:</span>
+                            <span className="text-gray-200">${tx.receipt.usdtCop.toLocaleString()} COP</span>
+                          </div>
+                        )}
+                        {tx.receipt.totalCop && (
+                          <div className="flex justify-between">
+                            <span>Total COP value:</span>
+                            <span className="text-emerald-400 font-bold">${tx.receipt.totalCop.toLocaleString()} COP</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     <div className="flex justify-between items-center text-[10px] text-gray-400 border-t border-white/5 pt-2 mt-1">
                       <span>User ID: <span className="font-mono text-gray-300">{tx.uid}</span></span>
