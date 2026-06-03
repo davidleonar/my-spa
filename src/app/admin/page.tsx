@@ -57,7 +57,7 @@ export default function AdminDashboard() {
   const [totalDepositsBtc, setTotalDepositsBtc] = useState<number>(0);
   const [totalFeesBtc, setTotalFeesBtc] = useState<number>(0);
   const [recentTransactions, setRecentTransactions] = useState<TransactionItem[]>([]);
-  
+
   // LND Node Balances
   const [nodeOnChainSat, setNodeOnChainSat] = useState<number | null>(null);
   const [nodeChannelsSat, setNodeChannelsSat] = useState<number | null>(null);
@@ -74,6 +74,17 @@ export default function AdminDashboard() {
   const [selectedUser, setSelectedUser] = useState<UserBalance | null>(null);
   const [allTransactions, setAllTransactions] = useState<TransactionItem[]>([]);
   const [showUserTransactions, setShowUserTransactions] = useState<boolean>(false);
+
+  // Manual Deposit States
+  const [showManualDepositForm, setShowManualDepositForm] = useState<boolean>(false);
+  const [manualDepositAmount, setManualDepositAmount] = useState<string>("1000000");
+  const [manualDepositTime, setManualDepositTime] = useState<string>("");
+  const [manualDepositDate, setManualDepositDate] = useState<string>("");
+  const [manualDepositUsdtCop, setManualDepositUsdtCop] = useState<string>("");
+  const [submittingManualDeposit, setSubmittingManualDeposit] = useState<boolean>(false);
+  const [manualDepositError, setManualDepositError] = useState<string | null>(null);
+  const [manualDepositSuccess, setManualDepositSuccess] = useState<string | null>(null);
+
 
   // Guard: Check admin authorization (Admin UID: '5XgksHrgmyeGqqKFYGVjQVM0KGl1')
   useEffect(() => {
@@ -101,7 +112,7 @@ export default function AdminDashboard() {
         for (const key in data) {
           const u = data[key];
           const btc = parseFloat((u.BTCbalance ?? u.BTCBalance ?? u.btcBalance ?? 0).toString().replace(',', '.'));
-          
+
           userList.push({
             id: u.id || key,
             name: u.name || "Anonymous",
@@ -267,6 +278,108 @@ export default function AdminDashboard() {
     }
   }, [user]);
 
+  // Init Date/Time values when manual deposit form is toggled open
+  useEffect(() => {
+    if (showManualDepositForm) {
+      const now = new Date();
+      // Format to Bogota time
+      const timeStr = now.toLocaleTimeString('en-US', { hour12: false, timeStyle: 'short', timeZone: 'America/Bogota' });
+      const dateStr = now.toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+      setManualDepositTime(timeStr);
+      setManualDepositDate(dateStr);
+      setManualDepositAmount("1000000");
+      setManualDepositUsdtCop("");
+      setManualDepositError(null);
+      setManualDepositSuccess(null);
+    }
+  }, [showManualDepositForm]);
+
+  const handleManualDepositSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedUser) return;
+
+    if (!manualDepositAmount || !manualDepositTime || !manualDepositDate) {
+      setManualDepositError("Please fill out all required fields: Amount, Time, Date.");
+      return;
+    }
+
+    const copAmountVal = parseFloat(manualDepositAmount.toString().replace(/,/g, ''));
+    if (isNaN(copAmountVal) || copAmountVal <= 0) {
+      setManualDepositError("Please enter a valid positive COP amount.");
+      return;
+    }
+
+    const isConfirmed = window.confirm(`¿Estás seguro de registrar un depósito manual de $${copAmountVal.toLocaleString('de-DE')} COP para ${selectedUser.name}?`);
+    if (!isConfirmed) return;
+
+    setSubmittingManualDeposit(true);
+    setManualDepositError(null);
+    setManualDepositSuccess(null);
+
+    try {
+      // 1. Get auth ID token
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) {
+        throw new Error("Admin authentication required.");
+      }
+
+      // 2. Call HTTPS Cloud Function
+      const response = await fetch(
+        "https://us-central1-rendimientos-5dbb9.cloudfunctions.net/createManualDeposit",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${idToken}`
+          },
+          body: JSON.stringify({
+            uid: selectedUser.uid || selectedUser.id,
+            amount: copAmountVal,
+            time: manualDepositTime,
+            date: manualDepositDate,
+            usdtCopRate: manualDepositUsdtCop ? parseFloat(manualDepositUsdtCop) : undefined
+          })
+        }
+      );
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `Request failed with status ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log("Manual deposit success:", result);
+      setManualDepositSuccess(`¡Depósito registrado con éxito! Se compraron ${result.btcBought} BTC a un precio de $${result.btcUsdtPrice.toLocaleString()} USD.`);
+      
+      // Update selectedUser balance values locally for immediate UI update
+      setSelectedUser((prev) => {
+        if (!prev) return null;
+        const oldBtc = prev.BTCbalance ?? 0;
+        const newBtc = parseFloat((oldBtc + result.btcBought).toFixed(8));
+        const oldCop = prev.totalCopInvested ?? 0;
+        const newCop = oldCop + copAmountVal;
+        const newAvg = newBtc > 0 ? Math.round(newCop / newBtc) : 0;
+        return {
+          ...prev,
+          BTCbalance: newBtc,
+          totalCopInvested: newCop,
+          avgBuyPrice: newAvg
+        };
+      });
+
+      // Clear form view after brief delay
+      setTimeout(() => {
+        setShowManualDepositForm(false);
+      }, 5000);
+
+    } catch (err: unknown) {
+      console.error("Manual deposit error:", err);
+      setManualDepositError(err instanceof Error ? err.message : "An unexpected error occurred.");
+    } finally {
+      setSubmittingManualDeposit(false);
+    }
+  };
+
   // 4. Binance WebSocket Integration
   useEffect(() => {
     const wsBtc = new WebSocket('wss://stream.binance.com:9443/ws/btcusdt@ticker');
@@ -303,11 +416,11 @@ export default function AdminDashboard() {
   // 5. Query matching logic for search
   const filteredUsers = searchQuery.trim() === ""
     ? []
-    : users.filter(u => 
-        u.uid?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        u.id?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        u.name?.toLowerCase().includes(searchQuery.toLowerCase())
-      );
+    : users.filter(u =>
+      u.uid?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      u.id?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      u.name?.toLowerCase().includes(searchQuery.toLowerCase())
+    );
 
   // Computations
   const liveBtcPriceCop = btcUsdt && usdtCop ? btcUsdt * usdtCop : 0;
@@ -315,7 +428,7 @@ export default function AdminDashboard() {
     ? (nodeOnChainSat + nodeChannelsSat) / 100000000
     : null;
 
-  const selectedUserTransactions = selectedUser 
+  const selectedUserTransactions = selectedUser
     ? allTransactions.filter(tx => tx.uid === selectedUser.uid || tx.uid === selectedUser.id)
     : [];
 
@@ -341,7 +454,7 @@ export default function AdminDashboard() {
       {/* Top Header */}
       <header className="sticky top-0 z-50 bg-[#0B0E11]/80 backdrop-blur-lg border-b border-white/5 py-4 px-6 md:px-12 flex justify-between items-center">
         <div className="flex items-center gap-3">
-          <button 
+          <button
             onClick={() => router.push('/')}
             className="p-2 hover:bg-white/5 rounded-full transition-colors group"
           >
@@ -362,9 +475,8 @@ export default function AdminDashboard() {
           {btcUsdt && (
             <div className="hidden sm:flex flex-col items-end">
               <span className="text-xs text-gray-400">LIVE BTC/USDT</span>
-              <span className={`font-bold transition-all duration-300 ${
-                prevBtcUsdt !== null && btcUsdt > prevBtcUsdt ? 'text-green-400' : 'text-red-400'
-              }`}>
+              <span className={`font-bold transition-all duration-300 ${prevBtcUsdt !== null && btcUsdt > prevBtcUsdt ? 'text-green-400' : 'text-red-400'
+                }`}>
                 ${btcUsdt.toLocaleString()}
               </span>
             </div>
@@ -382,10 +494,10 @@ export default function AdminDashboard() {
 
       {/* Main Container */}
       <main className="max-w-7xl mx-auto py-8 px-6 md:px-12 grid grid-cols-1 lg:grid-cols-3 gap-8">
-        
+
         {/* STATS SECTION (Grid 1 to 3 column layout span) */}
         <section className="lg:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-6">
-          
+
           {/* Card 1: Total BTC Deposited */}
           <div className="bg-white/[0.03] backdrop-blur-xl border border-white/5 rounded-2xl p-6 hover:scale-[1.01] transition-all duration-300 flex flex-col justify-between group">
             <div className="flex justify-between items-start">
@@ -428,7 +540,7 @@ export default function AdminDashboard() {
                   <p className="text-sm text-gray-400 mt-3">Unavailable</p>
                 )}
               </div>
-              <button 
+              <button
                 onClick={fetchLndBalances}
                 disabled={loadingNode}
                 className="p-3 bg-emerald-500/10 rounded-xl border border-emerald-500/20 hover:bg-emerald-500/20 active:scale-95 transition-all"
@@ -436,7 +548,7 @@ export default function AdminDashboard() {
                 <ArrowPathIcon className={`w-5 h-5 text-emerald-400 ${loadingNode ? 'animate-spin' : ''}`} />
               </button>
             </div>
-            
+
             {nodeError ? (
               <div className="mt-4 text-xs text-red-400">{nodeError}</div>
             ) : (nodeOnChainSat !== null && nodeChannelsSat !== null) && (
@@ -482,19 +594,19 @@ export default function AdminDashboard() {
 
         {/* LEFT COLUMN: Search & User Drawer (Spans 2 columns on desktop) */}
         <section className="lg:col-span-2 flex flex-col gap-6">
-          
+
           {/* User Search & Explorer */}
           <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-6">
             <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
               <span className="p-1.5 bg-primary/10 rounded-lg text-primary text-xs">🔍</span>
               Search Depositors Profile
             </h2>
-            
+
             {/* Search Input Bar */}
             <div className="relative">
-              <input 
-                type="text" 
-                placeholder="Query by UID, National ID (Cédula), or Full Name..." 
+              <input
+                type="text"
+                placeholder="Query by UID, National ID (Cédula), or Full Name..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full bg-[#141A20] border border-white/10 rounded-xl py-3 pl-11 pr-4 text-white focus:outline-none focus:border-primary transition-colors font-sans"
@@ -534,7 +646,7 @@ export default function AdminDashboard() {
               <div className="mt-6 bg-white/[0.02] border border-white/5 rounded-xl p-6 relative overflow-hidden group">
                 {/* Visual Glass Glow */}
                 <div className="absolute top-0 right-0 w-24 h-24 bg-primary/10 rounded-full blur-2xl group-hover:bg-primary/20 transition-all"></div>
-                
+
                 <div className="flex justify-between items-start mb-6">
                   <div>
                     <h3 className="text-xl font-bold text-white tracking-tight">{selectedUser.name}</h3>
@@ -543,7 +655,7 @@ export default function AdminDashboard() {
                       <span>National ID: <span className="text-gray-300">{selectedUser.id}</span></span>
                     </div>
                   </div>
-                  <button 
+                  <button
                     onClick={() => {
                       setSelectedUser(null);
                       setShowUserTransactions(false);
@@ -567,10 +679,10 @@ export default function AdminDashboard() {
                   <div className="bg-[#141A20]/50 border border-white/5 rounded-xl p-4 flex flex-col gap-1">
                     <span className="text-xs text-gray-400 uppercase font-medium">Live Value (COP)</span>
                     <span className="text-xl font-bold font-mono text-emerald-400">
-                      {liveBtcPriceCop > 0 
-                        ? `$${Math.round((selectedUser.BTCbalance ?? 0) * liveBtcPriceCop).toLocaleString('de-DE')} COP`
+                      {liveBtcPriceCop > 0
+                        ? `$${Math.round((selectedUser.BTCbalance ?? 0) * liveBtcPriceCop).toLocaleString('de-DE')}`
                         : "Calculating..."
-                      }
+                      } <span className="text-xs text-gray-400">COP</span>
                     </span>
                   </div>
 
@@ -579,12 +691,12 @@ export default function AdminDashboard() {
                     <span className="text-xs text-gray-400 uppercase font-medium">Avg Purchase Price</span>
                     <span className="text-lg font-bold font-mono text-white">
                       {selectedUser.avgBuyPrice && selectedUser.avgBuyPrice > 0
-                        ? (usdtCop 
-                            ? `$${Math.round(selectedUser.avgBuyPrice / usdtCop).toLocaleString()} USDT`
-                            : "Calculating..."
-                          )
+                        ? (usdtCop
+                          ? `$${Math.round(selectedUser.avgBuyPrice / usdtCop).toLocaleString()}`
+                          : "Calculating..."
+                        )
                         : "N/A"
-                      }
+                      }  <span className="text-xs text-gray-400">BTC/USDT</span>
                     </span>
                   </div>
 
@@ -596,11 +708,10 @@ export default function AdminDashboard() {
                         const yieldPercentage = ((liveBtcPriceCop - selectedUser.avgBuyPrice) / selectedUser.avgBuyPrice) * 100;
                         const isPositive = yieldPercentage >= 0;
                         return (
-                          <span className={`text-xl font-extrabold font-mono transition-all duration-300 ${
-                            isPositive 
-                              ? 'text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.3)]' 
-                              : 'text-red-400'
-                          }`}>
+                          <span className={`text-xl font-extrabold font-mono transition-all duration-300 ${isPositive
+                            ? 'text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.3)]'
+                            : 'text-red-400'
+                            }`}>
                             {isPositive ? "+" : ""}{yieldPercentage.toFixed(2)}%
                           </span>
                         );
@@ -616,6 +727,112 @@ export default function AdminDashboard() {
                 {/* Historical Metrics Table */}
                 <div className="mt-4 pt-4 border-t border-white/5 flex justify-between text-xs text-gray-400 font-mono">
                   <span>Total Invested: <span className="text-white">${(selectedUser.totalCopInvested ?? 0).toLocaleString('de-DE')} COP</span></span>
+                </div>
+
+                {/* Record Manual Deposit Option */}
+                <div className="mt-4 pt-4 border-t border-white/5 flex flex-col gap-4">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-gray-400 font-mono">Manual Operations</span>
+                    <button
+                      onClick={() => setShowManualDepositForm(!showManualDepositForm)}
+                      className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 px-3.5 py-1.5 rounded-xl font-medium transition-all duration-300 active:scale-95 flex items-center gap-1.5"
+                    >
+                      <span>📥</span>
+                      {showManualDepositForm ? "Cancel Deposit" : "Record Manual Deposit"}
+                    </button>
+                  </div>
+
+                  {showManualDepositForm && (
+                    <form onSubmit={handleManualDepositSubmit} className="bg-black/20 p-5 rounded-xl border border-white/5 flex flex-col gap-4 mt-2">
+                      <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                        <span>💰</span> Registrar Pago Manual (COP)
+                      </h4>
+                      <p className="text-xs text-gray-400">
+                        Esto generará una compra de mercado simulada utilizando el precio de Binance a la hora indicada.
+                      </p>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {/* COP Amount */}
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Monto (COP)</label>
+                          <input
+                            type="number"
+                            required
+                            value={manualDepositAmount}
+                            onChange={(e) => setManualDepositAmount(e.target.value)}
+                            className="bg-[#141A20] border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-primary text-sm font-mono"
+                            placeholder="1000000"
+                          />
+                        </div>
+
+                        {/* Override USDT/COP Rate */}
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Tasa USDT/COP (Opcional)</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={manualDepositUsdtCop}
+                            onChange={(e) => setManualDepositUsdtCop(e.target.value)}
+                            className="bg-[#141A20] border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-primary text-sm font-mono"
+                            placeholder="Auto (CoinGecko)"
+                          />
+                        </div>
+
+                        {/* Date */}
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Fecha (YYYY-MM-DD)</label>
+                          <input
+                            type="date"
+                            required
+                            value={manualDepositDate}
+                            onChange={(e) => setManualDepositDate(e.target.value)}
+                            className="bg-[#141A20] border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-primary text-sm font-mono"
+                          />
+                        </div>
+
+                        {/* Time */}
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Hora (HH:MM)</label>
+                          <input
+                            type="text"
+                            required
+                            pattern="^(0[0-9]|1[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$"
+                            value={manualDepositTime}
+                            onChange={(e) => setManualDepositTime(e.target.value)}
+                            className="bg-[#141A20] border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-primary text-sm font-mono"
+                            placeholder="11:59"
+                          />
+                        </div>
+                      </div>
+
+                      {manualDepositError && (
+                        <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs px-3 py-2.5 rounded-xl font-mono">
+                          ⚠️ {manualDepositError}
+                        </div>
+                      )}
+
+                      {manualDepositSuccess && (
+                        <div className="bg-green-500/10 border border-green-500/20 text-green-400 text-xs px-3 py-2.5 rounded-xl font-sans">
+                          ✅ {manualDepositSuccess}
+                        </div>
+                      )}
+
+                      <button
+                        type="submit"
+                        disabled={submittingManualDeposit}
+                        className="w-full bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-500/50 text-black py-2.5 rounded-xl font-bold transition-all text-sm flex justify-center items-center gap-2"
+                      >
+                        {submittingManualDeposit ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-t-transparent border-black rounded-full animate-spin"></div>
+                            Procesando...
+                          </>
+                        ) : (
+                          "Settle Manual Deposit (Liquidar)"
+                        )}
+                      </button>
+                    </form>
+                  )}
                 </div>
 
                 {/* View Transactions Toggle and List */}
@@ -638,16 +855,15 @@ export default function AdminDashboard() {
                   {showUserTransactions && selectedUserTransactions.length > 0 && (
                     <div className="flex flex-col gap-3 mt-2 max-h-80 overflow-y-auto pr-1">
                       {selectedUserTransactions.map((tx) => (
-                        <div 
+                        <div
                           key={tx.id}
                           className="bg-[#141A20]/80 border border-white/5 rounded-xl p-4 flex flex-col gap-2 hover:border-white/10 transition-colors"
                         >
                           <div className="flex justify-between items-start">
-                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase ${
-                              tx.type === 'deposit' 
-                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
-                                : 'bg-red-500/10 text-red-400 border border-red-500/20'
-                            }`}>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase ${tx.type === 'deposit'
+                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                              : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                              }`}>
                               {tx.type}
                             </span>
                             <span className="text-[10px] text-gray-400 font-mono">{tx.date} {tx.time}</span>
@@ -755,9 +971,8 @@ export default function AdminDashboard() {
                           )}
                           <div className="flex justify-between items-center text-[10px] text-gray-400 border-t border-white/5 pt-2 mt-1">
                             <span>Order / Ref ID: <span className="font-mono text-gray-300 select-all">{tx.id}</span></span>
-                            <span className={`font-semibold uppercase ${
-                              tx.status === 'settled' || tx.status === 'success' ? 'text-green-400' : 'text-yellow-500'
-                            }`}>{tx.status}</span>
+                            <span className={`font-semibold uppercase ${tx.status === 'settled' || tx.status === 'success' ? 'text-green-400' : 'text-yellow-500'
+                              }`}>{tx.status}</span>
                           </div>
                         </div>
                       ))}
@@ -771,26 +986,25 @@ export default function AdminDashboard() {
 
         {/* RIGHT COLUMN: Chronological Activity Feed (Spans 1 column on desktop) */}
         <section className="lg:col-span-1 flex flex-col gap-6">
-          
+
           <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-6">
             <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
               <span className="p-1.5 bg-yellow-500/10 rounded-lg text-yellow-500 text-xs">⚡</span>
               Recent Transactions (Last 3)
             </h2>
-            
+
             <div className="flex flex-col gap-4">
               {recentTransactions.length > 0 ? (
                 recentTransactions.map((tx) => (
-                  <div 
+                  <div
                     key={tx.id}
                     className="bg-[#141A20]/50 border border-white/5 rounded-xl p-4 flex flex-col gap-2 hover:border-white/10 transition-colors"
                   >
                     <div className="flex justify-between items-start">
-                      <span className={`text-xs px-2.5 py-0.5 rounded-full font-semibold uppercase ${
-                        tx.type === 'deposit' 
-                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
-                          : 'bg-red-500/10 text-red-400 border border-red-500/20'
-                      }`}>
+                      <span className={`text-xs px-2.5 py-0.5 rounded-full font-semibold uppercase ${tx.type === 'deposit'
+                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                        : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                        }`}>
                         {tx.type}
                       </span>
                       <span className="text-[10px] text-gray-400 font-mono">{tx.date} {tx.time}</span>
@@ -802,7 +1016,7 @@ export default function AdminDashboard() {
                       </span>
                       <span className="font-mono text-sm font-bold text-white">
                         {tx.type === 'deposit' ? '+' : '-'}
-                        {tx.btcBought || tx.requestedBtcAmount 
+                        {tx.btcBought || tx.requestedBtcAmount
                           ? `${(tx.btcBought || tx.requestedBtcAmount || 0).toFixed(8)} BTC`
                           : `$${parseFloat(tx.amount.toString()).toLocaleString('de-DE')} COP`
                         }
@@ -899,9 +1113,8 @@ export default function AdminDashboard() {
 
                     <div className="flex justify-between items-center text-[10px] text-gray-400 border-t border-white/5 pt-2 mt-1">
                       <span>User ID: <span className="font-mono text-gray-300">{tx.uid}</span></span>
-                      <span className={`font-semibold uppercase ${
-                        tx.status === 'settled' || tx.status === 'success' ? 'text-green-400' : 'text-yellow-500'
-                      }`}>{tx.status}</span>
+                      <span className={`font-semibold uppercase ${tx.status === 'settled' || tx.status === 'success' ? 'text-green-400' : 'text-yellow-500'
+                        }`}>{tx.status}</span>
                     </div>
                   </div>
                 ))

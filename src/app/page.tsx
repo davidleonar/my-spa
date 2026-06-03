@@ -203,27 +203,7 @@ export default function Home() {
   const [usdtPaymentStatus, setUsdtPaymentStatus] = useState<'pending' | 'confirmed' | null>(null);
   const [usdtError, setUsdtError] = useState<string | null>(null);
 
-  // States para Taproot Assets
-  const [showAdminAssets, setShowAdminAssets] = useState(false);
-  //const [edgeBalance, setEdgeBalance] = useState<number | null>(null);
-  //const [assetsBalances, setAssetsBalances] = useState<{ usdt: number; cop: number }>({ usdt: 0, cop: 0 });
-  //const [mintBurnHistory, setMintBurnHistory] = useState<MovementRow[]>([]);
 
-  const [mintAsset, setMintAsset] = useState('');
-  const [mintAmount, setMintAmount] = useState(0);
-  const [mintUserId, setMintUserId] = useState('');
-
-  const [burnAsset, setBurnAsset] = useState('');
-  const [burnAmount, setBurnAmount] = useState(0);
-  const [burnUserId, setBurnUserId] = useState('');
-  const [transferAsset, setTransferAsset] = useState('');
-  const [transferFromUserId, setTransferFromUserId] = useState('');
-  const [transferToUserId, setTransferToUserId] = useState('');
-  const [transferAmount, setTransferAmount] = useState(0);
-
-  const [tapdError, setTapdError] = useState<string | null>(null);
-  const [tapdMessage, setTapdMessage] = useState<string | null>(null);
-  const [tapdPath, setTapdPath] = useState<string>('v1/getinfo');
 
   // States for bank wwithdrawals
   const [showPendingWithdrawals, setShowPendingWithdrawals] = useState<boolean>(false);
@@ -1406,106 +1386,7 @@ export default function Home() {
   };
 
 
-  /* ------------------------------------------------------------------ */
-  /*  POST – Funciones para manejar TAPD (Mint, Burn, Transfer)          */
-  /* ------------------------------------------------------------------ */
 
-  const handleMint = async () => {
-    if (!mintAsset || mintAmount <= 0 || !mintUserId) return alert('Invalid input');
-    try {
-      const auth = getAuth();
-      const user = auth.currentUser;
-
-      if (!user) throw new Error("User not authenticated");
-
-      // 1. Get the Firebase ID token from the logged-in user.
-      const token = await user.getIdToken();
-
-      const body = {
-        asset: mintAsset,
-        amount: mintAmount,
-        userId: mintUserId,
-        memo: 'Donation from App',
-        expiry: '300',
-        private: false,
-        add_index: 1,
-      };
-      console.log('Sending donation request:', body);
-
-      const res = await fetch('/api/tapdProxy/v1/taproot-assets/assets', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ body }),
-      });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error('Proxy error:', errorText);
-        throw new Error(`Server error: ${res.status}`);
-      }
-
-      const data = await res.json();
-      console.log("TAPD response:", data);
-
-      setTapdError(null);
-      alert('Mint successful');
-
-    }
-    catch (err: unknown) {
-      const error = err as Error;
-      const message = error.message || 'Mint failed. Please try again.';
-      setTapdError(message);
-      console.error('Mint error:', error);
-    }
-  };
-  // Similar for handleBurn, handleTransfer (use /burnAsset, /transferAsset)
-
-  /* ------------------------------------------------------------------ */
-  /*  GET – Funcion para obtener info de TAPD            */
-  /* ------------------------------------------------------------------ */
-  const handleGet = async () => {
-    try {
-      const auth = getAuth();
-      const user = auth.currentUser;
-
-      if (!user) throw new Error("User not authenticated");
-
-      // 1. Get the Firebase ID token from the logged-in user.
-      const token = await user.getIdToken();
-
-      const res = await fetch(`/api/tapdProxy/${tapdPath}`, {
-        method: 'GET',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error('Proxy error:', errorText);
-        throw new Error(`Server error: ${res.status}`);
-      }
-
-      const data = await res.json();
-      console.log("TAPD response:", data);
-
-      setTapdError(null);
-      setTapdMessage('Get successful');
-      //alert('Get successful');
-
-      setBurnAsset('ok');
-      setBurnAmount(1);
-      setBurnUserId('ok');
-      setTransferAsset('ok');
-      setTransferAmount(1);
-      setTransferToUserId('ok');
-
-    }
-    catch (err: unknown) {
-      const error = err as Error;
-      const message = error.message || 'Get failed. Please try again.';
-      setTapdError(message);
-      console.error('Get error:', error);
-    }
-  };
 
   //---------------------------------------------------------------- */
   // Handle bank Settlement state for Withdrawals
@@ -1798,7 +1679,7 @@ export default function Home() {
                   <h3 className="text-xl font-bold mb-4 text-white flex items-center gap-2">
                     <span className="text-yellow-400">⚡ Savings (BTC Lightning)</span>
                   </h3>
-                  
+
                   {savingsPaymentStatus === 'settled' ? (
                     <div className="bg-green-500/20 border border-green-500/50 p-6 rounded-xl text-center animate-fade-in shadow-[0_0_20px_rgba(34,197,94,0.3)]">
                       <div className="text-4xl mb-4">🎉</div>
@@ -1828,7 +1709,7 @@ export default function Home() {
                         />
                         <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 font-medium">⚡ sats</span>
                       </div>
-                      
+
                       <button
                         onClick={generateSavingsInvoice}
                         disabled={savingsAmount <= 0 || savingsPaymentStatus === 'pending'}
@@ -1843,7 +1724,7 @@ export default function Home() {
                           <div className="w-6 h-6 border-2 border-t-yellow-500 border-gray-600 rounded-full animate-spin"></div>
                         </div>
                       )}
-                      
+
                       {isClient && savingsBolt11 && (
                         <div className="mt-6 text-center bg-white/5 border border-surface-border p-6 rounded-xl backdrop-blur-md">
                           <div className="bg-white p-2 rounded-xl inline-block shadow-lg">
@@ -1954,7 +1835,6 @@ export default function Home() {
                 </div>
               )}
             </div>
-
             <div className="mb-8 w-full">
               <button
                 onClick={() => setShowBtcLightningWithdrawal(!showBtcLightningWithdrawal)}
@@ -1969,7 +1849,7 @@ export default function Home() {
                   <h3 className="text-xl font-bold mb-4 text-white flex items-center gap-2">
                     <span className="text-yellow-400">⚡ Retiro BTC Lightning</span>
                   </h3>
-                  
+
                   {withdrawalPaymentStatus === 'success' ? (
                     <div className="bg-green-500/20 border border-green-500/50 p-6 rounded-xl text-center animate-fade-in shadow-[0_0_20px_rgba(34,197,94,0.3)] relative overflow-hidden">
                       {/* Premium CSS glowing ring animation */}
@@ -1977,12 +1857,12 @@ export default function Home() {
                         <div className="w-24 h-24 rounded-full border border-green-500/30 animate-ping duration-1000 opacity-75"></div>
                         <div className="w-16 h-16 rounded-full border border-green-400/50 animate-pulse opacity-50"></div>
                       </div>
-                      
+
                       <div className="relative z-10">
                         <div className="text-5xl mb-4 animate-bounce">🎉</div>
                         <h4 className="text-2xl font-bold text-green-400 mb-2">¡Retiro Exitoso!</h4>
                         <p className="text-green-100 mb-4">El pago Lightning se ha liquidado y tu saldo ha sido actualizado.</p>
-                        <button 
+                        <button
                           onClick={resetWithdrawal}
                           className="px-6 py-2 bg-green-600 hover:bg-green-500 text-white font-bold rounded-xl transition-all active:scale-95 shadow-md"
                         >
@@ -2015,7 +1895,7 @@ export default function Home() {
                           </button>
                         </div>
                         <div className="overflow-hidden rounded-xl border border-gray-700 bg-black">
-                          <QrScanner 
+                          <QrScanner
                             active={showScanner}
                             onScanSuccess={(text) => {
                               handleBolt11(text);
@@ -2068,22 +1948,22 @@ export default function Home() {
                             <span>Resumen de Retiro</span>
                             <span className="text-yellow-400 font-semibold">{withdrawalQuote.amountSats.toLocaleString('de-DE')} sats</span>
                           </h4>
-                          
+
                           <div className="flex justify-between">
                             <span>Monto a Retirar:</span>
                             <span className="text-white">{(withdrawalQuote.amountSats / 100000000).toFixed(8)} BTC</span>
                           </div>
-                          
+
                           <div className="flex justify-between">
                             <span>Comisión de Red (LND):</span>
                             <span className="text-white">{(withdrawalQuote.partnerFee / 100000000).toFixed(8)} BTC</span>
                           </div>
-                          
+
                           <div className="flex justify-between">
                             <span>Comisión de la Plataforma:</span>
                             <span className="text-white">{(withdrawalQuote.baseFee / 100000000).toFixed(8)} BTC</span>
                           </div>
-                          
+
                           <div className="flex justify-between border-t border-white/10 pt-2 font-bold text-white text-base">
                             <span>Total a Deducir:</span>
                             <span className="text-yellow-400">{(withdrawalQuote.totalSats / 100000000).toFixed(8)} BTC</span>
@@ -2120,7 +2000,7 @@ export default function Home() {
                               <span>Confirmar y Enviar Pago</span>
                             )}
                           </button>
-                          
+
                           <button
                             onClick={resetWithdrawal}
                             className="px-4 py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-xl transition-all font-semibold"
@@ -2656,71 +2536,6 @@ export default function Home() {
           </div>
         )}
 
-
-        {user?.uid === '5XgksHrgmyeGqqKFYGVjQVM0KGl1' && (
-          <div className="mt-6">
-            <h2 className="text-lg font-bold mb-4 text-center cursor-pointer" onClick={() => setShowAdminAssets(!showAdminAssets)}>
-              Admin Assets Management {showAdminAssets ? '▲' : '▼'}
-            </h2>
-            {showAdminAssets && (
-              <div className="bg-purple-900 p-4 rounded shadow">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {/* Mint Form */}
-                  <div className="bg-black/50 p-4 rounded">
-                    <h3 className="font-bold text-green-400">Mint Asset</h3>
-                    <select onChange={(e) => setMintAsset(e.target.value)} className="w-full p-2 bg-gray-800 rounded mt-2">
-                      <option value="">Select Asset</option>
-                      <option value="USDT">USDT</option>
-                      <option value="COP">COP</option>
-                    </select>
-                    <input type="number" placeholder="Amount" onChange={(e) => setMintAmount(parseFloat(e.target.value))} className="w-full p-2 bg-gray-800 rounded mt-2" />
-                    <input type="text" placeholder="User ID" onChange={(e) => setMintUserId(e.target.value)} className="w-full p-2 bg-gray-800 rounded mt-2" />
-                    <button onClick={handleMint} className="w-full mt-2 bg-green-600 hover:bg-green-700 py-2 rounded">Mint</button>
-                  </div>
-
-                  {/* Burn Form */}
-                  <div className="bg-black/50 p-4 rounded">
-                    <h3 className="font-bold text-red-400">Burn Asset</h3>
-                    <select onChange={(e) => setBurnAsset(e.target.value)} className="w-full p-2 bg-gray-800 rounded mt-2">
-                      <option value="">Select Asset</option>
-                      <option value="USDT">USDT</option>
-                      <option value="COP">COP</option>
-                    </select>
-                    <input type="number" placeholder="Amount" onChange={(e) => setBurnAmount(parseFloat(e.target.value))} className="w-full p-2 bg-gray-800 rounded mt-2" />
-                    <input type="text" placeholder="User ID" onChange={(e) => setBurnUserId(e.target.value)} className="w-full p-2 bg-gray-800 rounded mt-2" />
-                    <button className="w-full mt-2 bg-red-600 hover:bg-red-700 py-2 rounded">Burn</button>
-                  </div>
-
-                  {/* Transfer Form */}
-                  <div className="bg-black/50 p-4 rounded">
-                    <h3 className="font-bold text-blue-400">Transfer Asset</h3>
-                    <select onChange={(e) => setTransferAsset(e.target.value)} className="w-full p-2 bg-gray-800 rounded mt-2">
-                      <option value="">Select Asset</option>
-                      <option value="USDT">USDT</option>
-                      <option value="COP">COP</option>
-                    </select>
-                    <input type="number" placeholder="Amount" onChange={(e) => setTransferAmount(parseFloat(e.target.value))} className="w-full p-2 bg-gray-800 rounded mt-2" />
-                    <input type="text" placeholder="From User ID" onChange={(e) => setTransferFromUserId(e.target.value)} className="w-full p-2 bg-gray-800 rounded mt-2" />
-                    <input type="text" placeholder="To User ID" onChange={(e) => setTransferToUserId(e.target.value)} className="w-full p-2 bg-gray-800 rounded mt-2" />
-                    <button className="w-full mt-2 bg-blue-600 hover:bg-blue-700 py-2 rounded">Transfer</button>
-                  </div>
-                </div>
-              </div>
-
-            )}
-            <input type="text" placeholder="Tapd Path" value={tapdPath} onChange={(e) => setTapdPath(e.target.value)} className="w-full p-2 bg-gray-800 rounded mt-2" />
-            <button onClick={handleGet} className="w-full mt-2 bg-orange-600 hover:bg-orange-700 py-2 rounded">Call Tapd API</button>
-            {tapdError && <p className="text-red-400 mt-2">{tapdError}</p>}
-            {tapdMessage && <p className="text-green-400 mt-2">{tapdMessage}</p>}
-
-
-            <h3 className="font-bold text-blue-400">{burnAsset}, {burnAmount}, {burnUserId}, {transferAsset}, {transferAmount}, {transferFromUserId}, {transferToUserId}</h3>
-
-          </div>
-        )}
-
-
-
         <button
           onClick={handleWhatsAppClick}
           className="w-full mt-6 px-4 py-2 bg-green-600 rounded text-white hover:bg-green-700 transition-colors"
@@ -2785,8 +2600,11 @@ export default function Home() {
                       <>
                         <p className="text-white font-medium">Retiro a {item.bankName || 'Bitcoin'}</p>
                         <p className="text-red-400 font-bold">${item.saldoCop ? item.saldoCop.toLocaleString('de-DE') : Number(String(item.amount).replace(/,/g, '')).toLocaleString('de-DE')} <span className="text-xs text-gray-500">[{item.status}]</span></p>
+
                         {'receipt' in item && item.receipt && (
                           <div className="mt-2 text-xs bg-black/20 p-2 rounded">
+                            {item.totalBtcToDeduct !== undefined && (
+                              <p className="text-xs text-gray-400 mt-1"> BTC Retirado: {item.totalBtcToDeduct.toFixed(8)} BTC </p>)}
                             {item.receipt.btcUsdt && <p className="text-gray-400">BTC/USDT: ${item.receipt.btcUsdt}</p>}
                             {item.receipt.usdtCop && <p className="text-gray-400">USDT/COP: ${item.receipt.usdtCop}</p>}
                           </div>
