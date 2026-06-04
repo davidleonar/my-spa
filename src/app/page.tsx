@@ -348,7 +348,7 @@ export default function Home() {
 
     const unsubscribes: Array<() => void> = [];
 
-    if (user.uid === '5XgksHrgmyeGqqKFYGVjQVM0KGl1') {
+    if (user.uid === '5XgksHrgmyeGqqKFYGVjQVM0KGl1' || user.uid === 'VldgsZCsJaOTrFT2uR2YvXxUe7o1') {
       // Admin Listener: Listen to all withdrawals
       const withdrawalsRef = ref(database, 'withdrawals');
       const unsubscribeAdminW = onValue(withdrawalsRef, (snapshot) => {
@@ -1452,7 +1452,7 @@ export default function Home() {
             <div className="flex justify-center items-center gap-4 mb-4">
               <p className="text-lg font-medium text-gray-200">Bienvenido, <span className="text-white font-bold">{user.displayName || user.email}</span></p>
 
-              {user.uid === '5XgksHrgmyeGqqKFYGVjQVM0KGl1' ? (
+              {user.uid === '5XgksHrgmyeGqqKFYGVjQVM0KGl1' || user.uid === 'VldgsZCsJaOTrFT2uR2YvXxUe7o1' ? (
                 // Admin Bell
                 <button onClick={handleAdminBellClick} className="relative p-2 bg-white/5 hover:bg-white/10 rounded-full transition-colors active:scale-95 text-gray-300 hover:text-white border border-surface-border">
                   <BellIcon className="w-6 h-6" />
@@ -2465,7 +2465,7 @@ export default function Home() {
           )}
         </div>
 
-        {user?.uid === '5XgksHrgmyeGqqKFYGVjQVM0KGl1' && (
+        {(user?.uid === '5XgksHrgmyeGqqKFYGVjQVM0KGl1' || user?.uid === 'VldgsZCsJaOTrFT2uR2YvXxUe7o1') && (
           <div className="mt-6">
             <h2 className="text-lg font-bold mb-4 text-center cursor-pointer" onClick={() => setShowPendingWithdrawals(!showPendingWithdrawals)}>
               Pending Withdrawals {showPendingWithdrawals ? '▲' : '▼'}
@@ -2558,7 +2558,7 @@ export default function Home() {
               </button>
             </div>
             <div className="overflow-y-auto pr-2 space-y-4 flex-1">
-              {user?.uid === '5XgksHrgmyeGqqKFYGVjQVM0KGl1' && (
+              {(user?.uid === '5XgksHrgmyeGqqKFYGVjQVM0KGl1' || user?.uid === 'VldgsZCsJaOTrFT2uR2YvXxUe7o1') && (
                 <>
                   <h3 className="text-lg font-bold text-white mt-2 mb-2">Notificaciones del Sistema</h3>
                   {allAdminDeposits.length > 0 ? allAdminDeposits.map((dep, idx) => (

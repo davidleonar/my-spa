@@ -89,7 +89,7 @@ export default function AdminDashboard() {
   // Guard: Check admin authorization (Admin UID: '5XgksHrgmyeGqqKFYGVjQVM0KGl1')
   useEffect(() => {
     if (!loadingAuth) {
-      if (!user || user.uid !== '5XgksHrgmyeGqqKFYGVjQVM0KGl1') {
+      if (!user || (user.uid !== '5XgksHrgmyeGqqKFYGVjQVM0KGl1' && user.uid !== 'VldgsZCsJaOTrFT2uR2YvXxUe7o1')) {
         router.push('/');
       }
     }
@@ -97,7 +97,7 @@ export default function AdminDashboard() {
 
   // 1. Fetch Real-time RTDB Metrics
   useEffect(() => {
-    if (!user || user.uid !== '5XgksHrgmyeGqqKFYGVjQVM0KGl1') return;
+    if (!user || (user.uid !== '5XgksHrgmyeGqqKFYGVjQVM0KGl1' && user.uid !== 'VldgsZCsJaOTrFT2uR2YvXxUe7o1')) return;
 
     const unsubscribes: Array<() => void> = [];
 
@@ -160,7 +160,7 @@ export default function AdminDashboard() {
 
   // 2. Fetch & Merge Chronological Transaction Log (Last 3)
   useEffect(() => {
-    if (!user || user.uid !== '5XgksHrgmyeGqqKFYGVjQVM0KGl1') return;
+    if (!user || (user.uid !== '5XgksHrgmyeGqqKFYGVjQVM0KGl1' && user.uid !== 'VldgsZCsJaOTrFT2uR2YvXxUe7o1')) return;
 
     const unsubscribes: Array<() => void> = [];
 
@@ -273,7 +273,7 @@ export default function AdminDashboard() {
   };
 
   useEffect(() => {
-    if (user && user.uid === '5XgksHrgmyeGqqKFYGVjQVM0KGl1') {
+    if (user && (user.uid === '5XgksHrgmyeGqqKFYGVjQVM0KGl1' || user.uid === 'VldgsZCsJaOTrFT2uR2YvXxUe7o1')) {
       fetchLndBalances();
     }
   }, [user]);
@@ -440,7 +440,7 @@ export default function AdminDashboard() {
     );
   }
 
-  if (!user || user.uid !== '5XgksHrgmyeGqqKFYGVjQVM0KGl1') {
+  if (!user || (user.uid !== '5XgksHrgmyeGqqKFYGVjQVM0KGl1' && user.uid !== 'VldgsZCsJaOTrFT2uR2YvXxUe7o1')) {
     return (
       <div className="flex flex-col justify-center items-center min-h-screen bg-[#0B0E11] text-white gap-4">
         <h1 className="text-3xl font-bold text-red-500">Access Denied</h1>
