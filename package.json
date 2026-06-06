@@ -17,6 +17,7 @@
     "@metamask/detect-provider": "^2.0.0",
     "@metamask/providers": "^22.1.1",
     "@metamask/sdk": "^0.34.0",
+    "bitcoin-address-validation": "^2.2.3",
     "bolt11": "^1.0.0",
     "caniuse-lite": "^1.0.30001751",
     "countries-list": "^3.2.0",

@@ -34,15 +34,26 @@ export async function POST(req: NextRequest) {
   }
 
   const idToken = authHeader.split('Bearer ')[1];
+  let decodedToken;
   try {
-    await adminAuth.verifyIdToken(idToken);
+    decodedToken = await adminAuth.verifyIdToken(idToken);
   } catch {
     return new NextResponse(JSON.stringify({ error: 'Unauthorized: Invalid token' }), { status: 401 });
   }
 
-  // Start proxing request
   const { pathname, search } = new URL(req.url);
   const lndPath = pathname.replace(/^\/api\/lndProxy/, '') + search;
+  const pathWithoutQuery = lndPath.split('?')[0];
+
+  const ADMIN_UIDS = ['5XgksHrgmyeGqqKFYGVjQVM0KGl1', 'VldgsZCsJaOTrFT2uR2YvXxUe7o1'];
+  const isAdmin = ADMIN_UIDS.includes(decodedToken.uid);
+
+  if (!isAdmin) {
+    const allowedPOST = ['/v1/invoices', '/v1/channels/transactions'];
+    if (!allowedPOST.includes(pathWithoutQuery)) {
+      return new NextResponse(JSON.stringify({ error: 'Forbidden: Admin access required' }), { status: 403 });
+    }
+  }
 
   const proxyUrl = `https://us-central1-rendimientos-5dbb9.cloudfunctions.net/lndProxy?path=${lndPath}`;
 
@@ -131,8 +142,9 @@ export async function GET(req: NextRequest) {
   }
 
   const idToken = authHeader.split('Bearer ')[1];
+  let decodedToken;
   try {
-    await adminAuth.verifyIdToken(idToken);
+    decodedToken = await adminAuth.verifyIdToken(idToken);
   } catch {
     return new NextResponse(JSON.stringify({ error: 'Unauthorized: Invalid token' }), { status: 401 });
   }
@@ -140,6 +152,18 @@ export async function GET(req: NextRequest) {
   
   const { pathname, search } = new URL(req.url);
   const lndPath = pathname.replace(/^\/api\/lndProxy/, '') + search;
+  const pathWithoutQuery = lndPath.split('?')[0];
+
+  const ADMIN_UIDS = ['5XgksHrgmyeGqqKFYGVjQVM0KGl1', 'VldgsZCsJaOTrFT2uR2YvXxUe7o1'];
+  const isAdmin = ADMIN_UIDS.includes(decodedToken.uid);
+
+  if (!isAdmin) {
+    const isInvoiceGet = pathWithoutQuery.startsWith('/v1/invoice/');
+    const isFeesGet = pathWithoutQuery === '/v1/fees';
+    if (!isInvoiceGet && !isFeesGet) {
+      return new NextResponse(JSON.stringify({ error: 'Forbidden: Admin access required' }), { status: 403 });
+    }
+  }
 
   const proxyUrl = `https://us-central1-rendimientos-5dbb9.cloudfunctions.net/lndProxy?path=${lndPath}`;
 

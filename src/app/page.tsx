@@ -18,11 +18,10 @@ import {
 } from 'firebase/auth';
 import { useAuthState } from 'react-firebase-hooks/auth'; // npm install react-firebase-hooks
 //import { text } from "stream/consumers";
-
-import { getAuth } from 'firebase/auth';
 import { Buffer } from 'buffer';
 import ReactCountryFlag from 'react-country-flag';
 import { countries } from 'countries-list';
+import { validate as validateBtcAddress, Network } from 'bitcoin-address-validation';
 import Image from 'next/image';
 import { ethers } from 'ethers';
 import { useMetaMask } from '@/app/lib/useMetaMask';
@@ -30,18 +29,6 @@ import QrScanner from './components/QrScanner';
 import * as bolt11Lib from 'bolt11'; // Rename to avoid conflicts
 
 export const dynamic = 'force-dynamic';
-
-// Interface for balance data (from getDataById)
-interface SpreadsheetRow {
-  id: string;
-  name: string;
-  lastname: string;
-  BTCbalance: string;
-  COPbalance: string;
-  Rendimiento: string;
-  AvgCompra: string;
-  [key: string]: string | null;
-}
 
 // Interface for movement data (from getMovementsById)
 
@@ -72,7 +59,7 @@ interface BankWithdrawal {
   fee?: number;
   totalBtcToDeduct?: number;
   bankData?: string;
-  option: 'bancosColombia' | 'bancosInternacionales' | 'btcLightning' | 'usdtWallet' | 'copRetiros';
+  option: 'bancosColombia' | 'bancosInternacionales' | 'btcLightning' | 'usdtWallet' | 'copRetiros' | 'btcOnChain';
   name?: string;
   bank?: string;
   bankName?: string;
@@ -110,8 +97,6 @@ interface BankDeposit {
 }
 
 export default function Home() {
-  const [id, setId] = useState<string>("");
-  const [data, setData] = useState<SpreadsheetRow[]>([]);
   const [cryptoBalance, setCryptoBalance] = useState<number>(0);
   const [syncBtcBalance, setSyncBtcBalance] = useState<number>(0);
   const [avgBuyPrice, setAvgBuyPrice] = useState<number>(0);
@@ -155,9 +140,25 @@ export default function Home() {
   const [savingsLoading, setSavingsLoading] = useState<boolean>(false);
   const [savingsPaymentHash, setSavingsPaymentHash] = useState<string | null>(null);
 
+  // States for on-chain BTC deposit
+  const [showBtcOnChainDeposit, setShowBtcOnChainDeposit] = useState<boolean>(false);
+  const [btcDepositAddress, setBtcDepositAddress] = useState<string | null>(null);
+  const [loadingAddress, setLoadingAddress] = useState<boolean>(false);
+  const [addressError, setAddressError] = useState<string | null>(null);
+  const [copiedAddress, setCopiedAddress] = useState<boolean>(false);
+
+  // States for on-chain BTC withdrawal
+  const [withdrawalBtcAddress, setWithdrawalBtcAddress] = useState<string>('');
+  const [withdrawalBtcAmount, setWithdrawalBtcAmount] = useState<string>('');
+  const [withdrawalBtcAmountCop, setWithdrawalBtcAmountCop] = useState<string>('');
+  const [withdrawalBtcFeeTier, setWithdrawalBtcFeeTier] = useState<'high' | 'medium' | 'low'>('medium');
+  const [withdrawalBtcPreciseFees, setWithdrawalBtcPreciseFees] = useState<{ fastestFee: number; halfHourFee: number; hourFee: number } | null>(null);
+  const [loadingBtcFees, setLoadingBtcFees] = useState<boolean>(false);
+  const [submittingOnChainWithdrawal, setSubmittingOnChainWithdrawal] = useState<boolean>(false);
+
   // States for withdrawals
   const [showWithdrawals, setShowWithdrawals] = useState<boolean>(false);
-  const [withdrawalOption, setWithdrawalOption] = useState<'bancosColombia' | 'bancosInternacionales' | 'btcLightning' | 'usdtWallet' | null>(null);
+  const [withdrawalOption, setWithdrawalOption] = useState<'bancosColombia' | 'bancosInternacionales' | 'btcLightning' | 'usdtWallet' | 'btcOnChain' | null>(null);
 
   //States for BTC withdrawals
   const [withdrawalBolt11, setWithdrawalBolt11] = useState<string | null>(null);
@@ -457,8 +458,10 @@ export default function Home() {
           setSyncBtcBalance(0);
         }
         setAvgBuyPrice(userBalance.avgBuyPrice || 0);
+        setBtcDepositAddress(userBalance.btcDepositAddress || null);
       } else {
         setSyncBtcBalance(0);
+        setBtcDepositAddress(null);
       }
     });
     unsubscribes.push(unsubscribeB);
@@ -549,13 +552,13 @@ export default function Home() {
       }
     };
 
-    if (user && showCopRetiros) {
+    if (user && (showCopRetiros || (showWithdrawals && withdrawalOption === 'btcOnChain'))) {
       fetchLiveQuotes();
       intervalId = setInterval(fetchLiveQuotes, 60000);
     }
 
     return () => clearInterval(intervalId);
-  }, [user, showCopRetiros]);
+  }, [user, showCopRetiros, showWithdrawals, withdrawalOption]);
 
   // Fetch BTC/USD price using Binance WebSockets
   const currentPriceRef = useRef<number | null>(null);
@@ -615,47 +618,6 @@ export default function Home() {
         : 'text-white';    // No change
   };
 
-  const fetchData = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-
-      const auth = getAuth();
-      const user = auth.currentUser;
-
-      if (!user) throw new Error("User not authenticated");
-
-      // 1. Get the Firebase ID token from the logged-in user.
-      const idToken = await user.getIdToken();
-
-      const response = await fetch(
-        `https://us-central1-rendimientos-5dbb9.cloudfunctions.net/getDataById?id=${id}`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${idToken}`, // <-- This is the crucial part
-          }
-        }
-      );
-      if (!response.ok) {
-        throw new Error(`Usuario no encontrado! Status: ${response.status}`);
-      }
-      const result = await response.json();
-      console.log("Successfully fetched data:", result);
-      setData(result.data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch data");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (id) fetchData();
-  };
-
-
   // Handle WhatsApp chat button click
   const handleWhatsAppClick = () => {
     const phoneNumber = "573014375496"; // Replace with your WhatsApp number
@@ -696,7 +658,12 @@ export default function Home() {
       interval = setInterval(async () => {
         try {
           // Proxy through your existing LND route: /v1/invoice/{paymentHash}
-          const res = await fetch(`/api/lndProxy/v1/invoice/${paymentHash}`);
+          const idToken = await auth.currentUser?.getIdToken();
+          const res = await fetch(`/api/lndProxy/v1/invoice/${paymentHash}`, {
+            headers: {
+              'Authorization': `Bearer ${idToken || ''}`
+            }
+          });
           if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to check invoice`);
 
           const invoice: InvoiceStatus = await res.json();
@@ -758,10 +725,14 @@ export default function Home() {
         private: false,
         add_index: 1,
       };
+      const idToken = await auth.currentUser?.getIdToken();
       console.log('Sending donation request:', body);
       const res = await fetch('/api/lndProxy/v1/invoices', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken || ''}`
+        },
         body: JSON.stringify(body),
       });
 
@@ -837,7 +808,12 @@ export default function Home() {
     if (savingsPaymentHash && savingsPaymentStatus === 'pending') {
       interval = setInterval(async () => {
         try {
-          const res = await fetch(`/api/lndProxy/v1/invoice/${savingsPaymentHash}`);
+          const idToken = await auth.currentUser?.getIdToken();
+          const res = await fetch(`/api/lndProxy/v1/invoice/${savingsPaymentHash}`, {
+            headers: {
+              'Authorization': `Bearer ${idToken || ''}`
+            }
+          });
           if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to check invoice`);
 
           const invoice: InvoiceStatus = await res.json();
@@ -904,10 +880,14 @@ export default function Home() {
         private: false,
         add_index: 1,
       };
+      const idToken = await auth.currentUser?.getIdToken();
       console.log('Sending savings request:', body);
       const res = await fetch('/api/lndProxy/v1/invoices', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken || ''}`
+        },
         body: JSON.stringify(body),
       });
 
@@ -1124,6 +1104,30 @@ export default function Home() {
     }
   };
 
+  const handleWithdrawalBtcAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setWithdrawalBtcAmount(val);
+    if (liveBtcUsdt && liveUsdtCop && val) {
+      const copEq = parseFloat(val) * liveBtcUsdt * liveUsdtCop;
+      setWithdrawalBtcAmountCop(Math.floor(copEq).toLocaleString('de-DE'));
+    } else {
+      setWithdrawalBtcAmountCop('');
+    }
+  };
+
+  const handleWithdrawalBtcAmountCopChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawVal = e.target.value.replace(/\D/g, ''); // Remove non-digits
+    const formattedVal = rawVal ? Number(rawVal).toLocaleString('de-DE') : '';
+    setWithdrawalBtcAmountCop(formattedVal);
+
+    if (liveBtcUsdt && liveUsdtCop && rawVal) {
+      const btcEq = parseFloat(rawVal) / liveUsdtCop / liveBtcUsdt;
+      setWithdrawalBtcAmount(btcEq.toFixed(8));
+    } else {
+      setWithdrawalBtcAmount('');
+    }
+  };
+
   const handleCopRetirosSubmit = async () => {
     if (!user?.uid) {
       setCopRetirosError('You must be logged in to submit a withdrawal.');
@@ -1177,6 +1181,151 @@ export default function Home() {
     } catch (err) {
       console.error('Error submitting COP withdrawal:', err);
       alert('Failed to submit withdrawal. Please try again.');
+    }
+  };
+
+  const generateBtcDepositAddress = async () => {
+    if (!user) return;
+    setLoadingAddress(true);
+    setAddressError(null);
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch(
+        'https://us-central1-rendimientos-5dbb9.cloudfunctions.net/getNewDepositAddress',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${idToken}`
+          }
+        }
+      );
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt || 'Failed to generate address.');
+      }
+      const data = await res.json();
+      if (data.address) {
+        setBtcDepositAddress(data.address);
+      } else {
+        throw new Error('No address returned.');
+      }
+    } catch (err) {
+      console.error('Error generating address:', err);
+      setAddressError(err instanceof Error ? err.message : 'Error generating address.');
+    } finally {
+      setLoadingAddress(false);
+    }
+  };
+
+  const fetchPreciseFees = async () => {
+    setLoadingBtcFees(true);
+    try {
+      const res = await fetch('https://mempool.space/api/v1/fees/precise');
+      if (res.ok) {
+        const fees = await res.json();
+        setWithdrawalBtcPreciseFees({
+          fastestFee: parseFloat(fees.fastestFee),
+          halfHourFee: parseFloat(fees.halfHourFee),
+          hourFee: parseFloat(fees.hourFee)
+        });
+      }
+    } catch (err) {
+      console.warn('Could not fetch precise fees in frontend:', err);
+    } finally {
+      setLoadingBtcFees(false);
+    }
+  };
+
+  const handleOnChainWithdrawalSubmit = async () => {
+    if (!user?.uid) {
+      setWithdrawalError('You must be logged in to submit a withdrawal.');
+      return;
+    }
+    if (!withdrawalBtcAddress || !withdrawalBtcAmount || !withdrawalBtcFeeTier) {
+      alert('Por favor completa todos los campos.');
+      return;
+    }
+
+    // Client-side address validation
+    if (!validateBtcAddress(withdrawalBtcAddress, Network.mainnet)) {
+      alert('Por favor introduce una dirección Bitcoin válida (Mainnet).');
+      return;
+    }
+
+    const btcAmountVal = parseFloat(withdrawalBtcAmount);
+    if (isNaN(btcAmountVal) || btcAmountVal <= 0) {
+      alert('Por favor introduce un monto de BTC válido.');
+      return;
+    }
+
+    // Calculate total deduction for warning/confirmation
+    let feeRate = 15.0;
+    if (withdrawalBtcPreciseFees) {
+      if (withdrawalBtcFeeTier === 'high') feeRate = withdrawalBtcPreciseFees.fastestFee;
+      else if (withdrawalBtcFeeTier === 'medium') feeRate = withdrawalBtcPreciseFees.halfHourFee;
+      else feeRate = withdrawalBtcPreciseFees.hourFee;
+    }
+    const networkFee = parseFloat(((148 * feeRate) / 100000000).toFixed(8));
+    const platformFee = parseFloat((btcAmountVal * 0.01).toFixed(8));
+    const totalDeduct = parseFloat((btcAmountVal + networkFee + platformFee).toFixed(8));
+
+    if (totalDeduct > (cryptoBalance + syncBtcBalance)) {
+      alert(`Saldo BTC insuficiente. Se requieren ${totalDeduct} BTC (monto + comisiones) pero tu saldo es ${(cryptoBalance + syncBtcBalance).toFixed(8)} BTC.`);
+      return;
+    }
+
+    const isConfirmed = window.confirm(
+      `¿Estás seguro de solicitar un retiro de ${btcAmountVal} BTC?\n` +
+      `- Comisión de red estimada (${feeRate} sat/vB): ${networkFee.toFixed(8)} BTC\n` +
+      `- Comisión de plataforma (1%): ${platformFee.toFixed(8)} BTC\n` +
+      `- Deducción total: ${totalDeduct.toFixed(8)} BTC`
+    );
+    if (!isConfirmed) return;
+
+    setSubmittingOnChainWithdrawal(true);
+    setWithdrawalError(null);
+
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch(
+        'https://us-central1-rendimientos-5dbb9.cloudfunctions.net/processOnChainWithdrawal',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${idToken}`
+          },
+          body: JSON.stringify({
+            address: withdrawalBtcAddress,
+            amountBtc: btcAmountVal,
+            feeTier: withdrawalBtcFeeTier
+          })
+        }
+      );
+
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt || 'Failed to execute withdrawal.');
+      }
+
+      const result = await res.json();
+      console.log('On-chain withdrawal broadcasted successfully:', result);
+
+      alert(`¡Retiro enviado con éxito! ID de transacción: ${result.txid}`);
+
+      // Reset form
+      setWithdrawalBtcAddress('');
+      setWithdrawalBtcAmount('');
+      setWithdrawalBtcAmountCop('');
+      setWithdrawalOption(null);
+      setShowWithdrawals(false);
+
+    } catch (err) {
+      console.error('Error submitting withdrawal:', err);
+      alert(err instanceof Error ? err.message : 'Error submitting withdrawal.');
+    } finally {
+      setSubmittingOnChainWithdrawal(false);
     }
   };
 
@@ -1266,7 +1415,12 @@ export default function Home() {
       if (!amountSats) throw new Error('No amount in invoice');
 
       // Fetch partner fee via REST (LND proxy)
-      const feeRes = await fetch('/api/lndProxy/v1/fees'); // Or with ?amount=amountSats
+      const idToken = await auth.currentUser?.getIdToken();
+      const feeRes = await fetch('/api/lndProxy/v1/fees', {
+        headers: {
+          'Authorization': `Bearer ${idToken || ''}`
+        }
+      }); // Or with ?amount=amountSats
       const feeData = await feeRes.json();
       const partnerFee = feeData?.max_fee_per_msat * amountSats / 1000 || amountSats * 0.01; // Fallback 1%
 
@@ -1322,9 +1476,13 @@ export default function Home() {
     setWithdrawalPaymentStatus('pending');
     setScannerError(null);
     try {
+      const idToken = await auth.currentUser?.getIdToken();
       const payRes = await fetch('/api/lndProxy/v1/channels/transactions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken || ''}`
+        },
         body: JSON.stringify({ payment_request: withdrawalBolt11 }),
       });
 
@@ -1549,7 +1707,7 @@ export default function Home() {
 
         {user && (
           <>
-            <div className="bg-surface border border-surface-border backdrop-blur-md p-6 rounded-2xl shadow-lg mb-8 transition-transform hover:-translate-y-1">
+            <div className="bg-surface border border-surface-border backdrop-blur-md p-6 rounded-2xl shadow-lg mb-6 transition-transform hover:-translate-y-1">
               <h2 className="text-2xl font-bold mb-4 text-center text-white">BTC Wallet</h2>
               <div className="flex flex-col gap-1 pb-3">
                 <div className="flex justify-between items-center">
@@ -1617,7 +1775,7 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="mb-4 w-full">
+            <div className="mb-6 w-full">
               <button
                 onClick={() => setShowCopDepositos(!showCopDepositos)}
                 className="w-full px-4 py-4 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 rounded-2xl text-white font-bold text-lg shadow-[0_4px_20px_rgba(16,185,129,0.4)] transition-all active:scale-[0.98] flex items-center justify-center gap-2 border border-emerald-400/30"
@@ -1665,7 +1823,7 @@ export default function Home() {
               )}
             </div>
 
-            <div className="mb-4 w-full">
+            <div className="mb-6 w-full">
               <button
                 onClick={() => setShowBtcLightningDeposit(!showBtcLightningDeposit)}
                 className="w-full px-4 py-4 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-400 hover:to-orange-400 rounded-2xl text-white font-bold text-lg shadow-[0_4px_20px_rgba(245,158,11,0.4)] transition-all active:scale-[0.98] flex items-center justify-center gap-2 border border-orange-400/30"
@@ -1762,7 +1920,72 @@ export default function Home() {
               )}
             </div>
 
-            <div className="mb-8 w-full">
+            <div className="mb-6 w-full">
+              <button
+                onClick={() => setShowBtcOnChainDeposit(!showBtcOnChainDeposit)}
+                className="w-full px-4 py-4 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 rounded-2xl text-white font-bold text-lg shadow-[0_4px_20px_rgba(234,88,12,0.4)] transition-all active:scale-[0.98] flex items-center justify-center gap-2 border border-amber-400/30"
+              >
+                <span>Deposit via BTC On-Chain</span>
+                <span className="text-2xl" title="blockchain icon">🔗</span>
+              </button>
+
+              {showBtcOnChainDeposit && (
+                <div className="mt-4 bg-black/40 border border-surface-border p-6 rounded-2xl shadow-lg backdrop-blur-sm animate-fade-in text-left">
+                  <h3 className="text-xl font-bold mb-4 text-white flex items-center gap-2">
+                    <span className="text-orange-400">🔗 On-Chain (Bitcoin Network)</span>
+                  </h3>
+
+                  {btcDepositAddress ? (
+                    <div className="text-center flex flex-col items-center">
+                      <div className="bg-white p-2 rounded-xl inline-block shadow-lg mb-6">
+                        <QRCodeCanvas value={btcDepositAddress} size={180} />
+                      </div>
+                      <p className="text-gray-300 text-sm mb-4">Envía fondos a esta dirección Bitcoin:</p>
+
+                      <div className="w-full flex items-center bg-gray-900/80 rounded-xl p-3 border border-gray-700">
+                        <p className="text-xs text-gray-400 break-all px-2 font-mono text-left flex-1 selection:bg-orange-500/30">
+                          {btcDepositAddress}
+                        </p>
+                        <button
+                          onClick={() => {
+                            if (navigator.clipboard && navigator.clipboard.writeText) {
+                              navigator.clipboard.writeText(btcDepositAddress);
+                              setCopiedAddress(true);
+                              setTimeout(() => setCopiedAddress(false), 2000);
+                            }
+                          }}
+                          className="ml-2 p-2 bg-orange-500/20 hover:bg-orange-500/40 text-orange-400 rounded-lg transition-all active:scale-95 whitespace-nowrap text-sm font-medium"
+                        >
+                          {copiedAddress ? '¡Copiado!' : 'Copiar'}
+                        </button>
+                      </div>
+
+                      <p className="text-xs text-yellow-400/90 mt-4 leading-relaxed bg-yellow-400/5 p-3 rounded-lg border border-yellow-400/10">
+                        ⚠️ <strong>Nota:</strong> Los depósitos requieren exactamente <strong>1 confirmación</strong> de la red Bitcoin (~10 minutos) para acreditarse en tu balance.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="text-center">
+                      <p className="text-gray-300 mb-6 text-sm">Genera una dirección Bitcoin personal para transferir directamente a tu cuenta.</p>
+
+                      <button
+                        onClick={generateBtcDepositAddress}
+                        disabled={loadingAddress}
+                        className="px-6 py-3.5 bg-orange-600 hover:bg-orange-500 disabled:bg-gray-700 text-white font-bold rounded-xl transition-all shadow-md active:scale-95"
+                      >
+                        {loadingAddress ? 'Generando dirección...' : 'Generar Dirección de Depósito'}
+                      </button>
+
+                      {addressError && (
+                        <p className="text-red-400 text-sm mt-4">{addressError}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="mb-6 w-full">
               <button
                 onClick={() => setShowCopRetiros(!showCopRetiros)}
                 className="w-full px-4 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 rounded-2xl text-white font-bold text-lg shadow-[0_4px_20px_rgba(79,70,229,0.4)] transition-all active:scale-[0.98] flex items-center justify-center gap-2 border border-indigo-400/30"
@@ -1835,7 +2058,7 @@ export default function Home() {
                 </div>
               )}
             </div>
-            <div className="mb-8 w-full">
+            <div className="mb-6 w-full">
               <button
                 onClick={() => setShowBtcLightningWithdrawal(!showBtcLightningWithdrawal)}
                 className="w-full px-4 py-4 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 rounded-2xl text-white font-bold text-lg shadow-[0_4px_20px_rgba(245,158,11,0.4)] transition-all active:scale-[0.98] flex items-center justify-center gap-2 border border-yellow-400/30"
@@ -2021,68 +2244,203 @@ export default function Home() {
               )}
             </div>
 
-            <h1 className="text-2xl font-bold mb-4 text-center">Saldos de Inversión</h1>
-            <form onSubmit={handleSubmit} className="flex items-center space-x-2 mb-4">
-              <input
-                type="text"
-                value={id}
-                onChange={(e) => setId(e.target.value)}
-                placeholder="Ingresa tu ID o cedula"
-                className="w-full p-3 bg-black/40 border border-surface-border rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-primary transition-all"
-              />
+            <div className="mb-6 w-full">
               <button
-                type="submit"
-                disabled={loading}
-                className="px-6 py-3 bg-primary hover:bg-primary/80 rounded-xl text-white font-semibold disabled:bg-gray-700 transition-all shadow-[0_0_10px_rgba(139,92,246,0.5)] active:scale-[0.98]"
+                onClick={() => {
+                  const newState = !showWithdrawals || withdrawalOption !== 'btcOnChain';
+                  setShowWithdrawals(newState);
+                  setWithdrawalOption(newState ? 'btcOnChain' : null);
+                  if (newState) {
+                    fetchPreciseFees();
+                  }
+                }}
+                className="w-full px-4 py-4 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 rounded-2xl text-white font-bold text-lg shadow-[0_4px_20px_rgba(234,88,12,0.4)] transition-all active:scale-[0.98] flex items-center justify-center gap-2 border border-amber-400/30"
               >
-                {loading ? "..." : "Obtener Datos"}
+                <span>Retiro BTC On-Chain</span>
+                <span className="text-2xl" title="blockchain icon">🔗</span>
               </button>
-            </form>
 
-            {error && <p className="text-red-500 mb-4 text-center">{error}</p>}
+              {showWithdrawals && withdrawalOption === 'btcOnChain' && (
+                <div className="mt-4 bg-black/40 border border-surface-border p-6 rounded-2xl shadow-lg backdrop-blur-sm animate-fade-in text-left">
+                  <h3 className="text-xl font-bold mb-4 text-white flex items-center gap-2">
+                    <span className="text-orange-400">🔗 Retiro BTC On-Chain (Bitcoin Network)</span>
+                  </h3>
 
-            {data.length > 0 ? (
-              <div className="flex flex-col gap-4 mt-6">
-                {data.map((item, index) => (
-                  <div key={index} className="bg-surface border border-surface-border backdrop-blur-md p-6 rounded-2xl shadow-lg transition-transform hover:-translate-y-1">
-                    <h2 className="text-2xl font-bold mb-6 text-center text-white">
-                      {item.name} {item.lastname}
-                    </h2>
-                    <div className="space-y-4">
-                      <div className="flex justify-between items-center pb-3 border-b border-surface-border/50">
-                        <span className="font-medium text-gray-400">BTC Balance</span>
-                        <span className="text-xl font-bold text-white tracking-wider">{item.BTCbalance} <span className="text-primary">BTC</span></span>
-                      </div>
-                      <div className="flex justify-between items-center pb-3 border-b border-surface-border/50">
-                        <span className="font-medium text-gray-400">Saldo (Pesos)</span>
-                        <span className="text-xl font-bold text-white">{item.COPbalance} <span className="text-secondary">COP</span></span>
-                      </div>
-                      <div className="flex justify-between items-center pb-3 border-b border-surface-border/50">
-                        <span className="font-medium text-gray-400">Rendimiento</span>
-                        <span className="text-xl font-bold text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.5)]">{item.Rendimiento}</span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="font-medium text-gray-400">Precio Promedio Compra</span>
-                        <span className="font-mono text-white bg-white/10 px-2 py-1 rounded">{item.AvgCompra}</span>
-                      </div>
+                  <div className="text-xs text-yellow-400 mb-4 bg-yellow-400/10 p-3 rounded-xl border border-yellow-400/20 flex flex-col gap-1">
+                    <div className="flex justify-between items-center">
+                      <span>Tu Saldo BTC Autorizado:</span>
+                      <strong className="text-white text-sm">{(cryptoBalance + syncBtcBalance).toFixed(8)} BTC</strong>
                     </div>
                   </div>
-                ))}
-              </div>
-            ) : (
-              !loading && (
-                <p className="text-gray-400 text-center">
-                  No balances found. Enter an ID to fetch.
-                </p>
-              )
-            )}
+
+                  <div className="space-y-4">
+                    {/* Destination Address */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-1">Dirección de Destino</label>
+                      <input
+                        type="text"
+                        value={withdrawalBtcAddress}
+                        onChange={(e) => setWithdrawalBtcAddress(e.target.value)}
+                        placeholder="Pega la dirección Bitcoin (bc1... o 1... o 3...)"
+                        className="w-full p-3 bg-gray-900/80 border border-gray-700 rounded-xl text-white focus:ring-2 focus:ring-orange-500 outline-none text-sm font-mono"
+                      />
+                    </div>
+
+                    {/* Amount in BTC & COP Converter */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Monto (BTC)</label>
+                        <input
+                          type="number"
+                          step="0.00000001"
+                          value={withdrawalBtcAmount}
+                          onChange={handleWithdrawalBtcAmountChange}
+                          placeholder="0.00000000"
+                          className="w-full p-3 bg-gray-900/80 border border-gray-700 rounded-xl text-white focus:ring-2 focus:ring-orange-500 outline-none text-sm font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Equivalente en COP</label>
+                        <div className="relative">
+                          <span className="absolute left-3 top-3 text-gray-400 text-sm font-mono">$</span>
+                          <input
+                            type="text"
+                            value={withdrawalBtcAmountCop}
+                            onChange={handleWithdrawalBtcAmountCopChange}
+                            placeholder="0"
+                            className="w-full p-3 pl-7 bg-gray-900/80 border border-gray-700 rounded-xl text-white focus:ring-2 focus:ring-orange-500 outline-none text-sm font-mono"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Fee Priority Tier Selector */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-2.5">Prioridad de Comisión de Red</label>
+
+                      {loadingBtcFees ? (
+                        <div className="flex justify-center py-2">
+                          <div className="w-5 h-5 border-2 border-t-orange-500 border-gray-600 rounded-full animate-spin"></div>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-3 gap-2.5">
+                          <button
+                            type="button"
+                            onClick={() => setWithdrawalBtcFeeTier('high')}
+                            className={`p-2.5 rounded-xl border text-xs font-semibold flex flex-col items-center justify-center transition-all ${withdrawalBtcFeeTier === 'high'
+                                ? 'bg-orange-500/20 border-orange-500 text-orange-400 shadow-md'
+                                : 'bg-gray-900/40 border-gray-800 text-gray-400 hover:bg-gray-900/60'
+                              }`}
+                          >
+                            <span className="font-bold mb-0.5">Alta</span>
+                            <span className="text-[10px] font-mono text-gray-300">
+                              {withdrawalBtcPreciseFees ? `${withdrawalBtcPreciseFees.fastestFee} sat/vB` : 'Cargando...'}
+                            </span>
+                            <span className="text-[8px] text-gray-500 mt-0.5">~10 mins</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setWithdrawalBtcFeeTier('medium')}
+                            className={`p-2.5 rounded-xl border text-xs font-semibold flex flex-col items-center justify-center transition-all ${withdrawalBtcFeeTier === 'medium'
+                                ? 'bg-orange-500/20 border-orange-500 text-orange-400 shadow-md'
+                                : 'bg-gray-900/40 border-gray-800 text-gray-400 hover:bg-gray-900/60'
+                              }`}
+                          >
+                            <span className="font-bold mb-0.5">Media</span>
+                            <span className="text-[10px] font-mono text-gray-300">
+                              {withdrawalBtcPreciseFees ? `${withdrawalBtcPreciseFees.halfHourFee} sat/vB` : 'Cargando...'}
+                            </span>
+                            <span className="text-[8px] text-gray-500 mt-0.5">~30 mins</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setWithdrawalBtcFeeTier('low')}
+                            className={`p-2.5 rounded-xl border text-xs font-semibold flex flex-col items-center justify-center transition-all ${withdrawalBtcFeeTier === 'low'
+                                ? 'bg-orange-500/20 border-orange-500 text-orange-400 shadow-md'
+                                : 'bg-gray-900/40 border-gray-800 text-gray-400 hover:bg-gray-900/60'
+                              }`}
+                          >
+                            <span className="font-bold mb-0.5">Baja</span>
+                            <span className="text-[10px] font-mono text-gray-300">
+                              {withdrawalBtcPreciseFees ? `${withdrawalBtcPreciseFees.hourFee} sat/vB` : 'Cargando...'}
+                            </span>
+                            <span className="text-[8px] text-gray-500 mt-0.5">~60 mins</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Cost Breakdown */}
+                    {withdrawalBtcAmount && parseFloat(withdrawalBtcAmount) > 0 && (
+                      <div className="p-4 bg-white/5 border border-surface-border rounded-xl space-y-2 text-xs text-gray-300 font-medium">
+                        <div className="flex justify-between">
+                          <span>Monto Retiro:</span>
+                          <span className="text-white font-mono">{parseFloat(withdrawalBtcAmount).toFixed(8)} BTC</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Comisión de Red (Estimada 148 vB):</span>
+                          <span className="text-white font-mono">
+                            {(() => {
+                              let rate = 15.0;
+                              if (withdrawalBtcPreciseFees) {
+                                if (withdrawalBtcFeeTier === 'high') rate = withdrawalBtcPreciseFees.fastestFee;
+                                else if (withdrawalBtcFeeTier === 'medium') rate = withdrawalBtcPreciseFees.halfHourFee;
+                                else rate = withdrawalBtcPreciseFees.hourFee;
+                              }
+                              return ((148 * rate) / 100000000).toFixed(8);
+                            })()} BTC
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Comisión de Plataforma (1%):</span>
+                          <span className="text-white font-mono">
+                            {(parseFloat(withdrawalBtcAmount) * 0.01).toFixed(8)} BTC
+                          </span>
+                        </div>
+                        <div className="flex justify-between border-t border-white/10 pt-2 font-bold text-white text-sm">
+                          <span>Total a Deducir:</span>
+                          <span className="text-orange-400 font-mono">
+                            {(() => {
+                              const amt = parseFloat(withdrawalBtcAmount);
+                              let rate = 15.0;
+                              if (withdrawalBtcPreciseFees) {
+                                if (withdrawalBtcFeeTier === 'high') rate = withdrawalBtcPreciseFees.fastestFee;
+                                else if (withdrawalBtcFeeTier === 'medium') rate = withdrawalBtcPreciseFees.halfHourFee;
+                                else rate = withdrawalBtcPreciseFees.hourFee;
+                              }
+                              const netFee = (148 * rate) / 100000000;
+                              const platFee = amt * 0.01;
+                              return (amt + netFee + platFee).toFixed(8);
+                            })()} BTC
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="pt-2">
+                      <button
+                        onClick={handleOnChainWithdrawalSubmit}
+                        disabled={submittingOnChainWithdrawal || !withdrawalBtcAddress || !withdrawalBtcAmount}
+                        className="w-full py-3 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-500 hover:to-amber-500 disabled:from-gray-700 disabled:to-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed rounded-xl text-white font-bold transition-all shadow-lg text-center flex items-center justify-center gap-2"
+                      >
+                        {submittingOnChainWithdrawal ? (
+                          <>
+                            <div className="w-5 h-5 border-2 border-t-white border-gray-400 rounded-full animate-spin"></div>
+                            <span>Enviando Retiro...</span>
+                          </>
+                        ) : (
+                          <span>Confirmar y Retirar BTC</span>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
 
 
-            {loading && (
-              <div className="flex justify-center mt-4">
-                <div className="w-8 h-8 border-4 border-t-blue-500 border-gray-300 rounded-full animate-spin"></div>
-              </div>
-            )}
           </>
         )}
 

@@ -5,7 +5,9 @@ import { MetaMaskSDK } from '@metamask/sdk';
 import { useEffect, useState } from 'react';
 import { ethers } from 'ethers';
 
-let sdk: MetaMaskSDK | null = null;
+const globalForMetaMask = globalThis as unknown as {
+  sdk: MetaMaskSDK | undefined;
+};
 
 export function useMetaMask() {
   const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null);
@@ -18,8 +20,8 @@ export function useMetaMask() {
     setError(null);
 
     try {
-      if (!sdk) {
-        sdk = new MetaMaskSDK({
+      if (!globalForMetaMask.sdk) {
+        globalForMetaMask.sdk = new MetaMaskSDK({
           dappMetadata: {
             name: "Rendimientos",
             url: window.location.origin,
@@ -31,7 +33,7 @@ export function useMetaMask() {
         });
       }
 
-      const ethereum = sdk!.getProvider();  // Assert non-null
+      const ethereum = globalForMetaMask.sdk.getProvider();  // Assert non-null
       if (!ethereum) {
         throw new Error('MetaMask provider not available');
       }
@@ -73,8 +75,8 @@ export function useMetaMask() {
   };
 
   const disconnect = () => {  // <-- New: Expose this for use in page.tsx
-    if (sdk) {
-      sdk.terminate();  // Ends the SDK session
+    if (globalForMetaMask.sdk) {
+      globalForMetaMask.sdk.terminate();  // Ends the SDK session
     }
     setProvider(null);
     setAccount(null);
@@ -83,8 +85,8 @@ export function useMetaMask() {
 
   // Auto-reconnect on page load if session exists
   useEffect(() => {
-    if (sdk) {
-      const ethereum = sdk.getProvider();
+    if (globalForMetaMask.sdk) {
+      const ethereum = globalForMetaMask.sdk.getProvider();
       if (!ethereum) {
         throw new Error('MetaMask provider not available');
       }

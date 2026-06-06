@@ -249,14 +249,27 @@ export default function AdminDashboard() {
     setLoadingNode(true);
     setNodeError(null);
     try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) {
+        throw new Error("Authentication required.");
+      }
+
       // Confirmed & Unconfirmed On-chain balance
-      const chainRes = await fetch('/api/lndProxy/v1/balance/blockchain');
+      const chainRes = await fetch('/api/lndProxy/v1/balance/blockchain', {
+        headers: {
+          'Authorization': `Bearer ${idToken}`
+        }
+      });
       if (!chainRes.ok) throw new Error(`Blockchain balance failed: ${chainRes.status}`);
       const chainData = await chainRes.json();
       const onchain = parseInt(chainData.total_balance || '0');
 
       // Lightning Channels balance
-      const chanRes = await fetch('/api/lndProxy/v1/balance/channels');
+      const chanRes = await fetch('/api/lndProxy/v1/balance/channels', {
+        headers: {
+          'Authorization': `Bearer ${idToken}`
+        }
+      });
       if (!chanRes.ok) throw new Error(`Channels balance failed: ${chanRes.status}`);
       const chanData = await chanRes.json();
       const channels = parseInt(chanData.balance || '0');
