@@ -1,20 +1,59 @@
 // src/app/api/lndProxy/[...path]/route.ts
 import { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
+import { RateLimiterMemory } from 'rate-limiter-flexible'; // npm install (free lib)
+import { adminAuth } from '@/app/lib/firebase-admin'; // our initialized admin auth
+
+
+const limiter = new RateLimiterMemory({ points: 10, duration: 60 }); // 10/min per IP
 
 interface LndInvoiceRequest {
   value_msat: number;
   memo?: string;
   expiry?: string;
   private?: boolean;
+  payment_request?: string;
 }
 
 /* ------------------------------------------------------------------ */
-/*  POST – create invoice                                            */
+/*  POST – create invoice, Send Payment Request                       */
 /* ------------------------------------------------------------------ */
 export async function POST(req: NextRequest) {
+
+  // Rate limit
+  try {
+    await limiter.consume(req.headers.get('x-forwarded-for') || 'anonymous');
+  } catch {
+    return new NextResponse(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429 });
+  }
+
+  // Authenticate request
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    return new NextResponse(JSON.stringify({ error: 'Unauthorized: No token' }), { status: 401 });
+  }
+
+  const idToken = authHeader.split('Bearer ')[1];
+  let decodedToken;
+  try {
+    decodedToken = await adminAuth.verifyIdToken(idToken);
+  } catch {
+    return new NextResponse(JSON.stringify({ error: 'Unauthorized: Invalid token' }), { status: 401 });
+  }
+
   const { pathname, search } = new URL(req.url);
   const lndPath = pathname.replace(/^\/api\/lndProxy/, '') + search;
+  const pathWithoutQuery = lndPath.split('?')[0];
+
+  const ADMIN_UIDS = ['5XgksHrgmyeGqqKFYGVjQVM0KGl1', 'VldgsZCsJaOTrFT2uR2YvXxUe7o1'];
+  const isAdmin = ADMIN_UIDS.includes(decodedToken.uid);
+
+  if (!isAdmin) {
+    const allowedPOST = ['/v1/invoices', '/v1/channels/transactions'];
+    if (!allowedPOST.includes(pathWithoutQuery)) {
+      return new NextResponse(JSON.stringify({ error: 'Forbidden: Admin access required' }), { status: 403 });
+    }
+  }
 
   const proxyUrl = `https://us-central1-rendimientos-5dbb9.cloudfunctions.net/lndProxy?path=${lndPath}`;
 
@@ -36,6 +75,13 @@ export async function POST(req: NextRequest) {
     }
 
     console.log('Body:', payload);
+     
+    // Validate payment_request for /channels/transactions (payments) endpoint
+     if (lndPath.includes('/channels/transactions')) {
+      if (!payload?.payment_request?.match(/^ln(bc|tb|tc|regtest)[1-9a-zA-HJ-NP-Z]+$/i)) {
+      return new NextResponse(JSON.stringify({ error: 'Invalid payment request' }), { status: 400 });
+      }
+    }
 
     const firebaseResp = await fetch(proxyUrl, {
       method: 'POST',
@@ -81,12 +127,56 @@ export async function POST(req: NextRequest) {
 /*  GET – lookup invoice                                             */
 /* ------------------------------------------------------------------ */
 export async function GET(req: NextRequest) {
+
+  // Rate limit
+  try {
+    await limiter.consume(req.headers.get('x-forwarded-for') || 'anonymous');
+  } catch {
+    return new NextResponse(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429 });
+  }
+
+  // Authenticate request
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    return new NextResponse(JSON.stringify({ error: 'Unauthorized: No token' }), { status: 401 });
+  }
+
+  const idToken = authHeader.split('Bearer ')[1];
+  let decodedToken;
+  try {
+    decodedToken = await adminAuth.verifyIdToken(idToken);
+  } catch {
+    return new NextResponse(JSON.stringify({ error: 'Unauthorized: Invalid token' }), { status: 401 });
+  }
+  // End authentication - start proxing request
+  
   const { pathname, search } = new URL(req.url);
   const lndPath = pathname.replace(/^\/api\/lndProxy/, '') + search;
+  const pathWithoutQuery = lndPath.split('?')[0];
+
+  const ADMIN_UIDS = ['5XgksHrgmyeGqqKFYGVjQVM0KGl1', 'VldgsZCsJaOTrFT2uR2YvXxUe7o1'];
+  const isAdmin = ADMIN_UIDS.includes(decodedToken.uid);
+
+  if (!isAdmin) {
+    const isInvoiceGet = pathWithoutQuery.startsWith('/v1/invoice/');
+    const isFeesGet = pathWithoutQuery === '/v1/fees';
+    if (!isInvoiceGet && !isFeesGet) {
+      return new NextResponse(JSON.stringify({ error: 'Forbidden: Admin access required' }), { status: 403 });
+    }
+  }
 
   const proxyUrl = `https://us-central1-rendimientos-5dbb9.cloudfunctions.net/lndProxy?path=${lndPath}`;
 
   console.log('GET → Firebase:', proxyUrl);
+
+  // In GET for /invoice/{hash}
+  if (lndPath.startsWith('/v1/invoice/')) {
+    const hash = lndPath.split('/v1/invoice/')[1];
+
+    if (!/^[A-Za-z0-9+/=]{43,44}$/.test(hash)) { // Base64 regex
+    return new NextResponse(JSON.stringify({ error: 'Invalid hash format' }), { status: 400 });
+    }
+  }
 
   try {
     const firebaseResp = await fetch(proxyUrl, {

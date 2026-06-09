@@ -2,9 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  :root {
+    --background: #0B0F19; /* Very deep dark blue/black */
+    --foreground: #F8FAFC;
+  }
+}
+
 body {
   margin: 0;
   font-family: sans-serif;
+  background-color: var(--background);
+  color: var(--foreground);
 }
 
 .animate-spin {

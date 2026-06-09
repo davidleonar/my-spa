@@ -1,21 +1,16 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const inter = Inter({
   subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+  variable: "--font-inter",
 });
 
 export const metadata: Metadata = {
   title: "Rendimientos App",
   description: "Ahorra BTC de manera soberana",
-  icons: "/favicon.ico",
+  icons: "/pig-180-nobg.png",
   openGraph: {
     title: 'Rendimientos App',
     description: 'Ahorra BTC de manera soberana',
@@ -23,9 +18,9 @@ export const metadata: Metadata = {
     siteName: 'Rendimientos App',
     images: [
       {
-        url: 'https://rendimientos.net/AppIcon.appiconset/1024.png', // Absolute for crawlers
-        width: 1024,
-        height: 1024,
+        url: 'https://rendimientos.net/apple-touch-icon.png', // Absolute for crawlers
+        width: 180,
+        height: 180,
       },
     ],
     type: 'website',
@@ -34,7 +29,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'Rendimientos App',
     description: 'Ahorra BTC de manera soberana',
-    images: ['https://rendimientos.net/AppIcon.appiconset/1024.png'],
+    images: ['https://rendimientos.net/apple-touch-icon.png'],
   },
 
 };
@@ -45,9 +40,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" className={inter.variable}>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className="font-sans antialiased bg-background text-foreground min-h-screen selection:bg-primary selection:text-white"
       >
         {children}
       </body>
