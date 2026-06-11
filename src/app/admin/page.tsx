@@ -15,7 +15,6 @@ interface UserBalance {
   btcBalance?: number;
   avgBuyPrice?: number;
   totalCopInvested?: number;
-  Rendimiento?: string;
   uid?: string;
 }
 
@@ -119,7 +118,6 @@ export default function AdminDashboard() {
             BTCbalance: btc,
             avgBuyPrice: parseFloat((u.avgBuyPrice ?? 0).toString()),
             totalCopInvested: parseFloat((u.totalCopInvested ?? 0).toString()),
-            Rendimiento: u.Rendimiento || "0%",
             uid: u.uid || key
           });
 
@@ -180,14 +178,42 @@ export default function AdminDashboard() {
           const userDeps = depData[uid];
           for (const depId in userDeps) {
             const d = userDeps[depId];
+            
+            let displayDate = d.date;
+            let displayTime = d.time;
+            if ((!displayDate || displayDate === "N/A") && d.timestamp) {
+              try {
+                const dateObj = new Date(d.timestamp);
+                const parts = new Intl.DateTimeFormat('en-US', {
+                  timeZone: 'America/Bogota',
+                  day: '2-digit',
+                  month: 'short',
+                  year: 'numeric'
+                }).formatToParts(dateObj);
+                const day = parts.find(p => p.type === 'day')?.value || '01';
+                const month = parts.find(p => p.type === 'month')?.value || 'Jan';
+                const year = parts.find(p => p.type === 'year')?.value || '2026';
+                displayDate = `${day}-${month}-${year}`;
+                displayTime = new Intl.DateTimeFormat('en-US', {
+                  timeZone: 'America/Bogota',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit',
+                  hour12: false
+                }).format(dateObj);
+              } catch (e) {
+                console.error("Error formatting deposit timestamp:", e);
+              }
+            }
+
             tempDeps.push({
               type: 'deposit',
               id: depId,
               uid: uid,
               name: d.parsedName || "Bancolombia Deposit",
               amount: d.saldoCop || d.amount || 0,
-              date: d.date || "N/A",
-              time: d.time || "N/A",
+              date: displayDate || "N/A",
+              time: displayTime || "N/A",
               timestamp: d.timestamp || 0,
               status: d.status || "pending",
               btcBought: d.marketBuy?.btcBought || d.btcBought || 0,
@@ -205,17 +231,45 @@ export default function AdminDashboard() {
             const userWits = witData[uid];
             for (const witId in userWits) {
               const w = userWits[witId];
+              
+              let displayDate = w.date;
+              let displayTime = w.time;
+              if ((!displayDate || displayDate === "N/A") && w.timestamp) {
+                try {
+                  const dateObj = new Date(w.timestamp);
+                  const parts = new Intl.DateTimeFormat('en-US', {
+                    timeZone: 'America/Bogota',
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric'
+                  }).formatToParts(dateObj);
+                  const day = parts.find(p => p.type === 'day')?.value || '01';
+                  const month = parts.find(p => p.type === 'month')?.value || 'Jan';
+                  const year = parts.find(p => p.type === 'year')?.value || '2026';
+                  displayDate = `${day}-${month}-${year}`;
+                  displayTime = new Intl.DateTimeFormat('en-US', {
+                    timeZone: 'America/Bogota',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false
+                  }).format(dateObj);
+                } catch (e) {
+                  console.error("Error formatting withdrawal timestamp:", e);
+                }
+              }
+
               tempWits.push({
                 type: 'withdrawal',
                 id: witId,
                 uid: uid,
                 name: w.name || "Withdrawal Request",
-                amount: w.amount || 0,
-                date: w.date || "N/A",
-                time: w.time || "N/A",
+                amount: w.saldoCop || w.amount || 0,
+                date: displayDate || "N/A",
+                time: displayTime || "N/A",
                 timestamp: w.timestamp || 0,
                 status: w.status || "pending",
-                requestedBtcAmount: w.requestedBtcAmount || 0,
+                requestedBtcAmount: w.requestedBtcAmount || w.totalBtcToDeduct || 0,
                 fee: w.fee || 0,
                 option: w.option || "N/A",
                 receipt: w.receipt || undefined
@@ -430,9 +484,9 @@ export default function AdminDashboard() {
   const filteredUsers = searchQuery.trim() === ""
     ? []
     : users.filter(u =>
-      u.uid?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.id?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.name?.toLowerCase().includes(searchQuery.toLowerCase())
+      String(u.uid || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      String(u.id || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      String(u.name || '').toLowerCase().includes(searchQuery.toLowerCase())
     );
 
   // Computations
@@ -731,7 +785,7 @@ export default function AdminDashboard() {
                       })()
                     ) : (
                       <span className="text-gray-400 font-mono text-lg">
-                        {selectedUser.Rendimiento || "N/A"}
+                        N/A
                       </span>
                     )}
                   </div>
