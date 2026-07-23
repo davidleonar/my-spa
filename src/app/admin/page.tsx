@@ -77,6 +77,7 @@ export default function AdminDashboard() {
   // Manual Deposit States
   const [showManualDepositForm, setShowManualDepositForm] = useState<boolean>(false);
   const [manualDepositAmount, setManualDepositAmount] = useState<string>("1000000");
+  const [manualDepositFeeCop, setManualDepositFeeCop] = useState<string>("0");
   const [manualDepositTime, setManualDepositTime] = useState<string>("");
   const [manualDepositDate, setManualDepositDate] = useState<string>("");
   const [manualDepositUsdtCop, setManualDepositUsdtCop] = useState<string>("");
@@ -88,6 +89,7 @@ export default function AdminDashboard() {
   const [showManualWithdrawalForm, setShowManualWithdrawalForm] = useState<boolean>(false);
   const [manualWithdrawalAmountCop, setManualWithdrawalAmountCop] = useState<string>("");
   const [manualWithdrawalAmountBtc, setManualWithdrawalAmountBtc] = useState<string>("");
+  const [manualWithdrawalFeeBtc, setManualWithdrawalFeeBtc] = useState<string>("0");
   const [manualWithdrawalTime, setManualWithdrawalTime] = useState<string>("");
   const [manualWithdrawalDate, setManualWithdrawalDate] = useState<string>("");
   const [manualWithdrawalDestination, setManualWithdrawalDestination] = useState<string>("");
@@ -367,6 +369,7 @@ export default function AdminDashboard() {
       setManualDepositTime(timeStr);
       setManualDepositDate(dateStr);
       setManualDepositAmount("1000000");
+      setManualDepositFeeCop("0");
       setManualDepositUsdtCop("");
       setManualDepositError(null);
       setManualDepositSuccess(null);
@@ -388,7 +391,18 @@ export default function AdminDashboard() {
       return;
     }
 
-    const isConfirmed = window.confirm(`¿Estás seguro de registrar un depósito manual de $${copAmountVal.toLocaleString('de-DE')} COP para ${selectedUser.name}?`);
+    const feeCopVal = parseFloat(manualDepositFeeCop || "0");
+    if (isNaN(feeCopVal) || feeCopVal < 0) {
+      setManualDepositError("Please enter a valid fee amount.");
+      return;
+    }
+
+    if (feeCopVal >= copAmountVal) {
+      setManualDepositError("Fee cannot be greater than or equal to total deposit amount.");
+      return;
+    }
+
+    const isConfirmed = window.confirm(`¿Estás seguro de registrar un depósito manual de $${copAmountVal.toLocaleString('de-DE')} COP (Comisión: $${feeCopVal.toLocaleString('de-DE')} COP) para ${selectedUser.name}?`);
     if (!isConfirmed) return;
 
     setSubmittingManualDeposit(true);
@@ -414,6 +428,7 @@ export default function AdminDashboard() {
           body: JSON.stringify({
             uid: selectedUser.uid || selectedUser.id,
             amount: copAmountVal,
+            feeCop: feeCopVal,
             time: manualDepositTime,
             date: manualDepositDate,
             usdtCopRate: manualDepositUsdtCop ? parseFloat(manualDepositUsdtCop) : undefined
@@ -436,7 +451,8 @@ export default function AdminDashboard() {
         const oldBtc = prev.BTCbalance ?? 0;
         const newBtc = parseFloat((oldBtc + result.btcBought).toFixed(8));
         const oldCop = prev.totalCopInvested ?? 0;
-        const newCop = oldCop + copAmountVal;
+        const netInvested = result.netCop ?? (copAmountVal - feeCopVal);
+        const newCop = oldCop + netInvested;
         const newAvg = newBtc > 0 ? Math.round(newCop / newBtc) : 0;
         return {
           ...prev,
@@ -454,7 +470,6 @@ export default function AdminDashboard() {
     } catch (err: unknown) {
       console.error("Manual deposit error:", err);
       setManualDepositError(err instanceof Error ? err.message : "An unexpected error occurred.");
-    } finally {
       setSubmittingManualDeposit(false);
     }
   };
@@ -470,6 +485,7 @@ export default function AdminDashboard() {
       setManualWithdrawalDate(dateStr);
       setManualWithdrawalAmountCop("");
       setManualWithdrawalAmountBtc("");
+      setManualWithdrawalFeeBtc("0");
       setManualWithdrawalDestination("");
       setManualWithdrawalDesc("");
       setManualWithdrawalError(null);
@@ -512,20 +528,23 @@ export default function AdminDashboard() {
 
     const copAmountVal = parseFloat(manualWithdrawalAmountCop.toString().replace(/,/g, ''));
     const btcAmountVal = parseFloat(manualWithdrawalAmountBtc.toString());
+    const feeBtcVal = parseFloat(manualWithdrawalFeeBtc || "0");
 
-    if (isNaN(copAmountVal) || copAmountVal <= 0 || isNaN(btcAmountVal) || btcAmountVal <= 0) {
-      setManualWithdrawalError("Please enter valid positive COP and BTC amounts.");
+    if (isNaN(copAmountVal) || copAmountVal <= 0 || isNaN(btcAmountVal) || btcAmountVal <= 0 || isNaN(feeBtcVal) || feeBtcVal < 0) {
+      setManualWithdrawalError("Please enter valid positive COP and BTC amounts, and a valid non-negative fee.");
       return;
     }
+
+    const totalDeductBtc = parseFloat((btcAmountVal + feeBtcVal).toFixed(8));
 
     // Balance check client-side
     const currentBtc = selectedUser.BTCbalance ?? selectedUser.BTCBalance ?? selectedUser.btcBalance ?? 0;
-    if (currentBtc < btcAmountVal) {
-      setManualWithdrawalError(`Insufficient user balance. Available: ${currentBtc} BTC, Requesting: ${btcAmountVal} BTC.`);
+    if (currentBtc < totalDeductBtc) {
+      setManualWithdrawalError(`Insufficient user balance. Available: ${currentBtc} BTC, Total Required (incl. fee): ${totalDeductBtc} BTC.`);
       return;
     }
 
-    const isConfirmed = window.confirm(`¿Estás seguro de registrar un retiro manual de $${copAmountVal.toLocaleString('de-DE')} COP (${btcAmountVal.toFixed(8)} BTC) para ${selectedUser.name}?`);
+    const isConfirmed = window.confirm(`¿Estás seguro de registrar un retiro manual de $${copAmountVal.toLocaleString('de-DE')} COP (${btcAmountVal.toFixed(8)} BTC + Comisión ${feeBtcVal.toFixed(8)} BTC) para ${selectedUser.name}?`);
     if (!isConfirmed) return;
 
     setSubmittingManualWithdrawal(true);
@@ -552,6 +571,7 @@ export default function AdminDashboard() {
             uid: selectedUser.uid || selectedUser.id,
             amountCop: copAmountVal,
             amountBtc: btcAmountVal,
+            feeBtc: feeBtcVal,
             time: manualWithdrawalTime,
             date: manualWithdrawalDate,
             destinationAccount: manualWithdrawalDestination,
@@ -569,15 +589,15 @@ export default function AdminDashboard() {
 
       const result = await response.json();
       console.log("Manual withdrawal success:", result);
-      setManualWithdrawalSuccess(`¡Retiro registrado con éxito! Se debitaron ${btcAmountVal.toFixed(8)} BTC.`);
+      setManualWithdrawalSuccess(`¡Retiro registrado con éxito! Se debitaron ${totalDeductBtc.toFixed(8)} BTC.`);
 
       // Update selectedUser balance values locally for immediate UI update
       setSelectedUser((prev) => {
         if (!prev) return null;
         const oldBtc = prev.BTCbalance ?? 0;
-        const newBtc = parseFloat((oldBtc - btcAmountVal).toFixed(8));
+        const newBtc = parseFloat((oldBtc - totalDeductBtc).toFixed(8));
         const oldCop = prev.totalCopInvested ?? 0;
-        const fraction = oldBtc > 0 ? btcAmountVal / oldBtc : 0;
+        const fraction = oldBtc > 0 ? totalDeductBtc / oldBtc : 0;
         const newCop = parseFloat((oldCop - oldCop * fraction).toFixed(2));
         const newAvg = newBtc > 0 ? Math.round(newCop / newBtc) : 0;
         return {
@@ -993,12 +1013,25 @@ export default function AdminDashboard() {
                           <label className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Monto (BTC)</label>
                           <input
                             type="number"
-                            step="0.00000001"
+                            step="any"
                             required
                             value={manualWithdrawalAmountBtc}
                             onChange={(e) => handleManualWithdrawalBtcChange(e.target.value)}
                             className="bg-[#141A20] border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-primary text-sm font-mono"
-                            placeholder="0.005"
+                            placeholder="0.01"
+                          />
+                        </div>
+
+                        {/* Fee (BTC) */}
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Comisión (BTC - Opcional)</label>
+                          <input
+                            type="number"
+                            step="any"
+                            value={manualWithdrawalFeeBtc}
+                            onChange={(e) => setManualWithdrawalFeeBtc(e.target.value)}
+                            className="bg-[#141A20] border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-primary text-sm font-mono"
+                            placeholder="0.00005"
                           />
                         </div>
 
@@ -1116,6 +1149,18 @@ export default function AdminDashboard() {
                             onChange={(e) => setManualDepositAmount(e.target.value)}
                             className="bg-[#141A20] border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-primary text-sm font-mono"
                             placeholder="1000000"
+                          />
+                        </div>
+
+                        {/* Fee COP */}
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Comisión (COP - Opcional)</label>
+                          <input
+                            type="number"
+                            value={manualDepositFeeCop}
+                            onChange={(e) => setManualDepositFeeCop(e.target.value)}
+                            className="bg-[#141A20] border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-primary text-sm font-mono"
+                            placeholder="0"
                           />
                         </div>
 
