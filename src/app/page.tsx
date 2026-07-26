@@ -97,7 +97,6 @@ interface BankDeposit {
 }
 
 export default function Home() {
-  const [cryptoBalance, setCryptoBalance] = useState<number>(0);
   const [syncBtcBalance, setSyncBtcBalance] = useState<number>(0);
   const [avgBuyPrice, setAvgBuyPrice] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
@@ -435,16 +434,6 @@ export default function Home() {
       setAllUserDeposits(allD.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)));
     });
     unsubscribes.push(unsubscribeD);
-
-    const cryptoBalanceRef = ref(database, `cryptoBalances/${user.uid}`);
-    const unsubscribeC = onValue(cryptoBalanceRef, (snapshot) => {
-      if (snapshot.exists()) {
-        setCryptoBalance(snapshot.val().balance || 0);
-      } else {
-        setCryptoBalance(0);
-      }
-    });
-    unsubscribes.push(unsubscribeC);
 
     const balancesRef = ref(database, `balances/${user.uid}`);
     const unsubscribeB = onValue(balancesRef, (snapshot) => {
@@ -1143,7 +1132,7 @@ export default function Home() {
     const fee = requestedBtc * 0.01;
     const totalBtcToDeduct = requestedBtc + fee;
 
-    if (totalBtcToDeduct > (cryptoBalance + syncBtcBalance)) {
+    if (totalBtcToDeduct > syncBtcBalance) {
       alert('Insufficient total BTC balance to cover amount + 1% fee.');
       return;
     }
@@ -1270,8 +1259,8 @@ export default function Home() {
     const platformFee = parseFloat((btcAmountVal * 0.01).toFixed(8));
     const totalDeduct = parseFloat((btcAmountVal + networkFee + platformFee).toFixed(8));
 
-    if (totalDeduct > (cryptoBalance + syncBtcBalance)) {
-      alert(`Saldo BTC insuficiente. Se requieren ${totalDeduct} BTC (monto + comisiones) pero tu saldo es ${(cryptoBalance + syncBtcBalance).toFixed(8)} BTC.`);
+    if (totalDeduct > syncBtcBalance) {
+      alert(`Saldo BTC insuficiente. Se requieren ${totalDeduct} BTC (monto + comisiones) pero tu saldo es ${syncBtcBalance.toFixed(8)} BTC.`);
       return;
     }
 
@@ -1713,13 +1702,13 @@ export default function Home() {
                 <div className="flex justify-between items-center">
                   <span className="font-medium text-gray-400">Total BTC Balance</span>
                   <span className="text-3xl font-bold text-white tracking-wider">
-                    {(cryptoBalance + syncBtcBalance) > 0 ? (cryptoBalance + syncBtcBalance).toFixed(8) : "0.00000000"} <span className="text-primary">BTC</span>
+                    {syncBtcBalance > 0 ? syncBtcBalance.toFixed(8) : "0.00000000"} <span className="text-primary">BTC</span>
                   </span>
                 </div>
                 {currentPrice && currentUsdtCop && (
                   <div className="flex justify-end">
                     <span className="text-sm font-medium text-gray-400">
-                      ≈ {((cryptoBalance + syncBtcBalance) * currentPrice * currentUsdtCop).toLocaleString('de-DE', { maximumFractionDigits: 0 })} COP
+                      ≈ {(syncBtcBalance * currentPrice * currentUsdtCop).toLocaleString('de-DE', { maximumFractionDigits: 0 })} COP
                     </span>
                   </div>
                 )}
@@ -2269,7 +2258,7 @@ export default function Home() {
                   <div className="text-xs text-yellow-400 mb-4 bg-yellow-400/10 p-3 rounded-xl border border-yellow-400/20 flex flex-col gap-1">
                     <div className="flex justify-between items-center">
                       <span>Tu Saldo BTC Autorizado:</span>
-                      <strong className="text-white text-sm">{(cryptoBalance + syncBtcBalance).toFixed(8)} BTC</strong>
+                      <strong className="text-white text-sm">{syncBtcBalance.toFixed(8)} BTC</strong>
                     </div>
                   </div>
 

@@ -15,7 +15,6 @@ interface UserBalance {
   btcBalance?: number;
   avgBuyPrice?: number;
   totalCopInvested?: number;
-  Rendimiento?: string;
   uid?: string;
 }
 
@@ -78,12 +77,26 @@ export default function AdminDashboard() {
   // Manual Deposit States
   const [showManualDepositForm, setShowManualDepositForm] = useState<boolean>(false);
   const [manualDepositAmount, setManualDepositAmount] = useState<string>("1000000");
+  const [manualDepositFeeCop, setManualDepositFeeCop] = useState<string>("0");
   const [manualDepositTime, setManualDepositTime] = useState<string>("");
   const [manualDepositDate, setManualDepositDate] = useState<string>("");
   const [manualDepositUsdtCop, setManualDepositUsdtCop] = useState<string>("");
   const [submittingManualDeposit, setSubmittingManualDeposit] = useState<boolean>(false);
   const [manualDepositError, setManualDepositError] = useState<string | null>(null);
   const [manualDepositSuccess, setManualDepositSuccess] = useState<string | null>(null);
+
+  // Manual Withdrawal States
+  const [showManualWithdrawalForm, setShowManualWithdrawalForm] = useState<boolean>(false);
+  const [manualWithdrawalAmountCop, setManualWithdrawalAmountCop] = useState<string>("");
+  const [manualWithdrawalAmountBtc, setManualWithdrawalAmountBtc] = useState<string>("");
+  const [manualWithdrawalFeeBtc, setManualWithdrawalFeeBtc] = useState<string>("0");
+  const [manualWithdrawalTime, setManualWithdrawalTime] = useState<string>("");
+  const [manualWithdrawalDate, setManualWithdrawalDate] = useState<string>("");
+  const [manualWithdrawalDestination, setManualWithdrawalDestination] = useState<string>("");
+  const [manualWithdrawalDesc, setManualWithdrawalDesc] = useState<string>("");
+  const [submittingManualWithdrawal, setSubmittingManualWithdrawal] = useState<boolean>(false);
+  const [manualWithdrawalError, setManualWithdrawalError] = useState<string | null>(null);
+  const [manualWithdrawalSuccess, setManualWithdrawalSuccess] = useState<string | null>(null);
 
 
   // Guard: Check admin authorization (Admin UID: '5XgksHrgmyeGqqKFYGVjQVM0KGl1')
@@ -119,7 +132,6 @@ export default function AdminDashboard() {
             BTCbalance: btc,
             avgBuyPrice: parseFloat((u.avgBuyPrice ?? 0).toString()),
             totalCopInvested: parseFloat((u.totalCopInvested ?? 0).toString()),
-            Rendimiento: u.Rendimiento || "0%",
             uid: u.uid || key
           });
 
@@ -180,14 +192,42 @@ export default function AdminDashboard() {
           const userDeps = depData[uid];
           for (const depId in userDeps) {
             const d = userDeps[depId];
+            
+            let displayDate = d.date;
+            let displayTime = d.time;
+            if ((!displayDate || displayDate === "N/A") && d.timestamp) {
+              try {
+                const dateObj = new Date(d.timestamp);
+                const parts = new Intl.DateTimeFormat('en-US', {
+                  timeZone: 'America/Bogota',
+                  day: '2-digit',
+                  month: 'short',
+                  year: 'numeric'
+                }).formatToParts(dateObj);
+                const day = parts.find(p => p.type === 'day')?.value || '01';
+                const month = parts.find(p => p.type === 'month')?.value || 'Jan';
+                const year = parts.find(p => p.type === 'year')?.value || '2026';
+                displayDate = `${day}-${month}-${year}`;
+                displayTime = new Intl.DateTimeFormat('en-US', {
+                  timeZone: 'America/Bogota',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit',
+                  hour12: false
+                }).format(dateObj);
+              } catch (e) {
+                console.error("Error formatting deposit timestamp:", e);
+              }
+            }
+
             tempDeps.push({
               type: 'deposit',
               id: depId,
               uid: uid,
               name: d.parsedName || "Bancolombia Deposit",
               amount: d.saldoCop || d.amount || 0,
-              date: d.date || "N/A",
-              time: d.time || "N/A",
+              date: displayDate || "N/A",
+              time: displayTime || "N/A",
               timestamp: d.timestamp || 0,
               status: d.status || "pending",
               btcBought: d.marketBuy?.btcBought || d.btcBought || 0,
@@ -205,17 +245,45 @@ export default function AdminDashboard() {
             const userWits = witData[uid];
             for (const witId in userWits) {
               const w = userWits[witId];
+              
+              let displayDate = w.date;
+              let displayTime = w.time;
+              if ((!displayDate || displayDate === "N/A") && w.timestamp) {
+                try {
+                  const dateObj = new Date(w.timestamp);
+                  const parts = new Intl.DateTimeFormat('en-US', {
+                    timeZone: 'America/Bogota',
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric'
+                  }).formatToParts(dateObj);
+                  const day = parts.find(p => p.type === 'day')?.value || '01';
+                  const month = parts.find(p => p.type === 'month')?.value || 'Jan';
+                  const year = parts.find(p => p.type === 'year')?.value || '2026';
+                  displayDate = `${day}-${month}-${year}`;
+                  displayTime = new Intl.DateTimeFormat('en-US', {
+                    timeZone: 'America/Bogota',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false
+                  }).format(dateObj);
+                } catch (e) {
+                  console.error("Error formatting withdrawal timestamp:", e);
+                }
+              }
+
               tempWits.push({
                 type: 'withdrawal',
                 id: witId,
                 uid: uid,
                 name: w.name || "Withdrawal Request",
-                amount: w.amount || 0,
-                date: w.date || "N/A",
-                time: w.time || "N/A",
+                amount: w.saldoCop || w.amount || 0,
+                date: displayDate || "N/A",
+                time: displayTime || "N/A",
                 timestamp: w.timestamp || 0,
                 status: w.status || "pending",
-                requestedBtcAmount: w.requestedBtcAmount || 0,
+                requestedBtcAmount: w.requestedBtcAmount || w.totalBtcToDeduct || 0,
                 fee: w.fee || 0,
                 option: w.option || "N/A",
                 receipt: w.receipt || undefined
@@ -301,6 +369,7 @@ export default function AdminDashboard() {
       setManualDepositTime(timeStr);
       setManualDepositDate(dateStr);
       setManualDepositAmount("1000000");
+      setManualDepositFeeCop("0");
       setManualDepositUsdtCop("");
       setManualDepositError(null);
       setManualDepositSuccess(null);
@@ -322,7 +391,18 @@ export default function AdminDashboard() {
       return;
     }
 
-    const isConfirmed = window.confirm(`¿Estás seguro de registrar un depósito manual de $${copAmountVal.toLocaleString('de-DE')} COP para ${selectedUser.name}?`);
+    const feeCopVal = parseFloat(manualDepositFeeCop || "0");
+    if (isNaN(feeCopVal) || feeCopVal < 0) {
+      setManualDepositError("Please enter a valid fee amount.");
+      return;
+    }
+
+    if (feeCopVal >= copAmountVal) {
+      setManualDepositError("Fee cannot be greater than or equal to total deposit amount.");
+      return;
+    }
+
+    const isConfirmed = window.confirm(`¿Estás seguro de registrar un depósito manual de $${copAmountVal.toLocaleString('de-DE')} COP (Comisión: $${feeCopVal.toLocaleString('de-DE')} COP) para ${selectedUser.name}?`);
     if (!isConfirmed) return;
 
     setSubmittingManualDeposit(true);
@@ -348,6 +428,7 @@ export default function AdminDashboard() {
           body: JSON.stringify({
             uid: selectedUser.uid || selectedUser.id,
             amount: copAmountVal,
+            feeCop: feeCopVal,
             time: manualDepositTime,
             date: manualDepositDate,
             usdtCopRate: manualDepositUsdtCop ? parseFloat(manualDepositUsdtCop) : undefined
@@ -370,7 +451,8 @@ export default function AdminDashboard() {
         const oldBtc = prev.BTCbalance ?? 0;
         const newBtc = parseFloat((oldBtc + result.btcBought).toFixed(8));
         const oldCop = prev.totalCopInvested ?? 0;
-        const newCop = oldCop + copAmountVal;
+        const netInvested = result.netCop ?? (copAmountVal - feeCopVal);
+        const newCop = oldCop + netInvested;
         const newAvg = newBtc > 0 ? Math.round(newCop / newBtc) : 0;
         return {
           ...prev,
@@ -388,8 +470,154 @@ export default function AdminDashboard() {
     } catch (err: unknown) {
       console.error("Manual deposit error:", err);
       setManualDepositError(err instanceof Error ? err.message : "An unexpected error occurred.");
-    } finally {
       setSubmittingManualDeposit(false);
+    }
+  };
+
+  // Init Date/Time values when manual withdrawal form is toggled open
+  useEffect(() => {
+    if (showManualWithdrawalForm) {
+      const now = new Date();
+      // Format to Bogota time
+      const timeStr = now.toLocaleTimeString('en-US', { hour12: false, timeStyle: 'short', timeZone: 'America/Bogota' });
+      const dateStr = now.toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+      setManualWithdrawalTime(timeStr);
+      setManualWithdrawalDate(dateStr);
+      setManualWithdrawalAmountCop("");
+      setManualWithdrawalAmountBtc("");
+      setManualWithdrawalFeeBtc("0");
+      setManualWithdrawalDestination("");
+      setManualWithdrawalDesc("");
+      setManualWithdrawalError(null);
+      setManualWithdrawalSuccess(null);
+    }
+  }, [showManualWithdrawalForm]);
+
+  const handleManualWithdrawalCopChange = (val: string) => {
+    setManualWithdrawalAmountCop(val);
+    if (!val) {
+      setManualWithdrawalAmountBtc("");
+      return;
+    }
+    const copVal = parseFloat(val);
+    if (!isNaN(copVal) && liveBtcPriceCop > 0) {
+      setManualWithdrawalAmountBtc((copVal / liveBtcPriceCop).toFixed(8));
+    }
+  };
+
+  const handleManualWithdrawalBtcChange = (val: string) => {
+    setManualWithdrawalAmountBtc(val);
+    if (!val) {
+      setManualWithdrawalAmountCop("");
+      return;
+    }
+    const btcVal = parseFloat(val);
+    if (!isNaN(btcVal) && liveBtcPriceCop > 0) {
+      setManualWithdrawalAmountCop(Math.round(btcVal * liveBtcPriceCop).toString());
+    }
+  };
+
+  const handleManualWithdrawalSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedUser) return;
+
+    if (!manualWithdrawalAmountCop || !manualWithdrawalAmountBtc || !manualWithdrawalTime || !manualWithdrawalDate || !manualWithdrawalDestination) {
+      setManualWithdrawalError("Please fill out all required fields: Amount, Time, Date, Destination.");
+      return;
+    }
+
+    const copAmountVal = parseFloat(manualWithdrawalAmountCop.toString().replace(/,/g, ''));
+    const btcAmountVal = parseFloat(manualWithdrawalAmountBtc.toString());
+    const feeBtcVal = parseFloat(manualWithdrawalFeeBtc || "0");
+
+    if (isNaN(copAmountVal) || copAmountVal <= 0 || isNaN(btcAmountVal) || btcAmountVal <= 0 || isNaN(feeBtcVal) || feeBtcVal < 0) {
+      setManualWithdrawalError("Please enter valid positive COP and BTC amounts, and a valid non-negative fee.");
+      return;
+    }
+
+    const totalDeductBtc = parseFloat((btcAmountVal + feeBtcVal).toFixed(8));
+
+    // Balance check client-side
+    const currentBtc = selectedUser.BTCbalance ?? selectedUser.BTCBalance ?? selectedUser.btcBalance ?? 0;
+    if (currentBtc < totalDeductBtc) {
+      setManualWithdrawalError(`Insufficient user balance. Available: ${currentBtc} BTC, Total Required (incl. fee): ${totalDeductBtc} BTC.`);
+      return;
+    }
+
+    const isConfirmed = window.confirm(`¿Estás seguro de registrar un retiro manual de $${copAmountVal.toLocaleString('de-DE')} COP (${btcAmountVal.toFixed(8)} BTC + Comisión ${feeBtcVal.toFixed(8)} BTC) para ${selectedUser.name}?`);
+    if (!isConfirmed) return;
+
+    setSubmittingManualWithdrawal(true);
+    setManualWithdrawalError(null);
+    setManualWithdrawalSuccess(null);
+
+    try {
+      // 1. Get auth ID token
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) {
+        throw new Error("Admin authentication required.");
+      }
+
+      // 2. Call HTTPS Cloud Function
+      const response = await fetch(
+        "https://us-central1-rendimientos-5dbb9.cloudfunctions.net/createManualWithdrawal",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${idToken}`
+          },
+          body: JSON.stringify({
+            uid: selectedUser.uid || selectedUser.id,
+            amountCop: copAmountVal,
+            amountBtc: btcAmountVal,
+            feeBtc: feeBtcVal,
+            time: manualWithdrawalTime,
+            date: manualWithdrawalDate,
+            destinationAccount: manualWithdrawalDestination,
+            destinationAccountDescription: manualWithdrawalDesc,
+            btcUsdtPrice: btcUsdt || undefined,
+            usdtCopRate: usdtCop || undefined
+          })
+        }
+      );
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `Request failed with status ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log("Manual withdrawal success:", result);
+      setManualWithdrawalSuccess(`¡Retiro registrado con éxito! Se debitaron ${totalDeductBtc.toFixed(8)} BTC.`);
+
+      // Update selectedUser balance values locally for immediate UI update
+      setSelectedUser((prev) => {
+        if (!prev) return null;
+        const oldBtc = prev.BTCbalance ?? 0;
+        const newBtc = parseFloat((oldBtc - totalDeductBtc).toFixed(8));
+        const oldCop = prev.totalCopInvested ?? 0;
+        const fraction = oldBtc > 0 ? totalDeductBtc / oldBtc : 0;
+        const newCop = parseFloat((oldCop - oldCop * fraction).toFixed(2));
+        const newAvg = newBtc > 0 ? Math.round(newCop / newBtc) : 0;
+        return {
+          ...prev,
+          BTCbalance: newBtc,
+          totalCopInvested: newCop,
+          avgBuyPrice: newAvg
+        };
+      });
+
+      // Clear form view after brief delay
+      setTimeout(() => {
+        setShowManualWithdrawalForm(false);
+      }, 5000);
+
+    } catch (err: unknown) {
+      console.error("Manual withdrawal error:", err);
+      setManualWithdrawalError(err instanceof Error ? err.message : "An unexpected error occurred.");
+    } finally {
+      setSubmittingManualWithdrawal(false);
     }
   };
 
@@ -430,9 +658,9 @@ export default function AdminDashboard() {
   const filteredUsers = searchQuery.trim() === ""
     ? []
     : users.filter(u =>
-      u.uid?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.id?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.name?.toLowerCase().includes(searchQuery.toLowerCase())
+      String(u.uid || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      String(u.id || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      String(u.name || '').toLowerCase().includes(searchQuery.toLowerCase())
     );
 
   // Computations
@@ -731,7 +959,7 @@ export default function AdminDashboard() {
                       })()
                     ) : (
                       <span className="text-gray-400 font-mono text-lg">
-                        {selectedUser.Rendimiento || "N/A"}
+                        N/A
                       </span>
                     )}
                   </div>
@@ -742,18 +970,164 @@ export default function AdminDashboard() {
                   <span>Total Invested: <span className="text-white">${(selectedUser.totalCopInvested ?? 0).toLocaleString('de-DE')} COP</span></span>
                 </div>
 
-                {/* Record Manual Deposit Option */}
+                {/* Record Manual Deposit / Withdrawal Option */}
                 <div className="mt-4 pt-4 border-t border-white/5 flex flex-col gap-4">
-                  <div className="flex justify-between items-center">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                     <span className="text-xs text-gray-400 font-mono">Manual Operations</span>
-                    <button
-                      onClick={() => setShowManualDepositForm(!showManualDepositForm)}
-                      className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 px-3.5 py-1.5 rounded-xl font-medium transition-all duration-300 active:scale-95 flex items-center gap-1.5"
-                    >
-                      <span>📥</span>
-                      {showManualDepositForm ? "Cancel Deposit" : "Record Manual Deposit"}
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          setShowManualDepositForm(!showManualDepositForm);
+                          setShowManualWithdrawalForm(false);
+                        }}
+                        className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 px-3 py-1.5 rounded-xl font-medium transition-all duration-300 active:scale-95 flex items-center gap-1.5"
+                      >
+                        <span>📥</span>
+                        {showManualDepositForm ? "Cancel Deposit" : "Record Deposit"}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setShowManualWithdrawalForm(!showManualWithdrawalForm);
+                          setShowManualDepositForm(false);
+                        }}
+                        className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 hover:bg-red-500/20 px-3 py-1.5 rounded-xl font-medium transition-all duration-300 active:scale-95 flex items-center gap-1.5"
+                      >
+                        <span>📤</span>
+                        {showManualWithdrawalForm ? "Cancel Withdrawal" : "Record Withdrawal"}
+                      </button>
+                    </div>
                   </div>
+
+                  {showManualWithdrawalForm && (
+                    <form onSubmit={handleManualWithdrawalSubmit} className="bg-black/20 p-5 rounded-xl border border-white/5 flex flex-col gap-4 mt-2">
+                      <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                        <span>📤</span> Registrar Retiro Manual
+                      </h4>
+                      <p className="text-xs text-gray-400">
+                        Esto registrará un retiro manual en COP y BTC, deduciendo el saldo del usuario y creando una notificación de retiro completado.
+                      </p>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {/* BTC Amount */}
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Monto (BTC)</label>
+                          <input
+                            type="number"
+                            step="any"
+                            required
+                            value={manualWithdrawalAmountBtc}
+                            onChange={(e) => handleManualWithdrawalBtcChange(e.target.value)}
+                            className="bg-[#141A20] border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-primary text-sm font-mono"
+                            placeholder="0.01"
+                          />
+                        </div>
+
+                        {/* Fee (BTC) */}
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Comisión (BTC - Opcional)</label>
+                          <input
+                            type="number"
+                            step="any"
+                            value={manualWithdrawalFeeBtc}
+                            onChange={(e) => setManualWithdrawalFeeBtc(e.target.value)}
+                            className="bg-[#141A20] border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-primary text-sm font-mono"
+                            placeholder="0.00005"
+                          />
+                        </div>
+
+                        {/* COP Amount */}
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Monto (COP)</label>
+                          <input
+                            type="number"
+                            required
+                            value={manualWithdrawalAmountCop}
+                            onChange={(e) => handleManualWithdrawalCopChange(e.target.value)}
+                            className="bg-[#141A20] border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-primary text-sm font-mono"
+                            placeholder="1000000"
+                          />
+                        </div>
+
+                        {/* Destination Account */}
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Cuenta de Destino</label>
+                          <input
+                            type="text"
+                            required
+                            value={manualWithdrawalDestination}
+                            onChange={(e) => setManualWithdrawalDestination(e.target.value)}
+                            className="bg-[#141A20] border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-primary text-sm"
+                            placeholder="Bancolombia Ahorros 12345..."
+                          />
+                        </div>
+
+                        {/* Destination Account Description */}
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Descripción de Cuenta</label>
+                          <input
+                            type="text"
+                            value={manualWithdrawalDesc}
+                            onChange={(e) => setManualWithdrawalDesc(e.target.value)}
+                            className="bg-[#141A20] border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-primary text-sm"
+                            placeholder="Ahorros - Titular: John Doe"
+                          />
+                        </div>
+
+                        {/* Date */}
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Fecha (YYYY-MM-DD)</label>
+                          <input
+                            type="date"
+                            required
+                            value={manualWithdrawalDate}
+                            onChange={(e) => setManualWithdrawalDate(e.target.value)}
+                            className="bg-[#141A20] border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-primary text-sm font-mono"
+                          />
+                        </div>
+
+                        {/* Time */}
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Hora (HH:MM)</label>
+                          <input
+                            type="text"
+                            required
+                            pattern="^(0[0-9]|1[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$"
+                            value={manualWithdrawalTime}
+                            onChange={(e) => setManualWithdrawalTime(e.target.value)}
+                            className="bg-[#141A20] border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-primary text-sm font-mono"
+                            placeholder="11:59"
+                          />
+                        </div>
+                      </div>
+
+                      {manualWithdrawalError && (
+                        <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs px-3 py-2.5 rounded-xl font-mono">
+                          ⚠️ {manualWithdrawalError}
+                        </div>
+                      )}
+
+                      {manualWithdrawalSuccess && (
+                        <div className="bg-green-500/10 border border-green-500/20 text-green-400 text-xs px-3 py-2.5 rounded-xl font-sans">
+                          ✅ {manualWithdrawalSuccess}
+                        </div>
+                      )}
+
+                      <button
+                        type="submit"
+                        disabled={submittingManualWithdrawal}
+                        className="w-full bg-red-500 hover:bg-red-600 disabled:bg-red-500/50 text-white py-2.5 rounded-xl font-bold transition-all text-sm flex justify-center items-center gap-2"
+                      >
+                        {submittingManualWithdrawal ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-t-transparent border-white rounded-full animate-spin"></div>
+                            Procesando...
+                          </>
+                        ) : (
+                          "Settle Manual Withdrawal (Liquidar)"
+                        )}
+                      </button>
+                    </form>
+                  )}
 
                   {showManualDepositForm && (
                     <form onSubmit={handleManualDepositSubmit} className="bg-black/20 p-5 rounded-xl border border-white/5 flex flex-col gap-4 mt-2">
@@ -775,6 +1149,18 @@ export default function AdminDashboard() {
                             onChange={(e) => setManualDepositAmount(e.target.value)}
                             className="bg-[#141A20] border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-primary text-sm font-mono"
                             placeholder="1000000"
+                          />
+                        </div>
+
+                        {/* Fee COP */}
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[10px] uppercase tracking-wider text-gray-400 font-bold">Comisión (COP - Opcional)</label>
+                          <input
+                            type="number"
+                            value={manualDepositFeeCop}
+                            onChange={(e) => setManualDepositFeeCop(e.target.value)}
+                            className="bg-[#141A20] border border-white/10 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-primary text-sm font-mono"
+                            placeholder="0"
                           />
                         </div>
 
