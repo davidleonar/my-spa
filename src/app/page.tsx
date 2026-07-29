@@ -99,6 +99,8 @@ interface BankDeposit {
 export default function Home() {
   const [syncBtcBalance, setSyncBtcBalance] = useState<number>(0);
   const [avgBuyPrice, setAvgBuyPrice] = useState<number>(0);
+  const [avgBuyPriceUsdt, setAvgBuyPriceUsdt] = useState<number>(0);
+  const [totalCopInvested, setTotalCopInvested] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   // State for BTC/USD price tracking
@@ -447,6 +449,8 @@ export default function Home() {
           setSyncBtcBalance(0);
         }
         setAvgBuyPrice(userBalance.avgBuyPrice || 0);
+        setAvgBuyPriceUsdt(userBalance.avgBuyPriceUsdt || 0);
+        setTotalCopInvested(userBalance.totalCopInvested || 0);
         setBtcDepositAddress(userBalance.btcDepositAddress || null);
       } else {
         setSyncBtcBalance(0);
@@ -1712,8 +1716,8 @@ export default function Home() {
                     </span>
                   </div>
                 )}
-                {avgBuyPrice > 0 && (() => {
-                  // Compute weighted average BTC/USDT from loaded deposits
+                {(avgBuyPrice > 0 || avgBuyPriceUsdt > 0) && (() => {
+                  // Compute weighted average BTC/USDT from loaded deposits as fallback if RTDB value missing
                   let totalBtcWeighted = 0;
                   let totalBtcQty = 0;
                   allUserDeposits.forEach((dep) => {
@@ -1724,7 +1728,8 @@ export default function Home() {
                       totalBtcQty += btc;
                     }
                   });
-                  const avgUsdt = totalBtcQty > 0 ? Math.round(totalBtcWeighted / totalBtcQty) : 0;
+                  const computedAvgUsdt = totalBtcQty > 0 ? Math.round(totalBtcWeighted / totalBtcQty) : 0;
+                  const finalAvgUsdt = avgBuyPriceUsdt > 0 ? avgBuyPriceUsdt : computedAvgUsdt;
 
                   // Compute Rendimiento (yield) from live BTC/COP vs avg buy price
                   const currentBtcCop = currentPrice && currentUsdtCop ? currentPrice * currentUsdtCop : 0;
@@ -1732,23 +1737,29 @@ export default function Home() {
                     ? ((currentBtcCop - avgBuyPrice) / avgBuyPrice) * 100
                     : null;
 
+                  const calculatedCopInvested = allUserDeposits.reduce((acc, dep) => acc + (dep.saldoCop || 0), 0);
+                  const finalCopInvested = totalCopInvested > 0 ? totalCopInvested : calculatedCopInvested;
+
                   return (
                     <div className="flex flex-col gap-2 pt-3 border-t border-surface-border/50">
-                      <div className="flex justify-between items-center">
-                        <span className="font-medium text-gray-400">Precio Prom. Compra</span>
-                        <span className="font-mono text-white bg-white/10 px-2 py-1 rounded">
-                          ${avgBuyPrice.toLocaleString('de-DE')} <span className="text-xs text-gray-400">COP/BTC</span>
-                        </span>
-                      </div>
-                      {avgUsdt > 0 && (
-                        <div className="flex justify-end">
-                          <span className="font-mono text-sm text-gray-400 bg-white/5 px-2 py-1 rounded">
-                            ${avgUsdt.toLocaleString('de-DE')} <span className="text-xs">USDT/BTC</span>
+                      {finalAvgUsdt > 0 && (
+                        <div className="flex justify-between items-center">
+                          <span className="font-medium text-gray-400 text-sm">Precio Prom. Compra</span>
+                          <span className="font-mono text-base font-bold text-white">
+                            ${finalAvgUsdt.toLocaleString('de-DE')} <span className="text-xs text-gray-400 font-normal">USDT/BTC</span>
+                          </span>
+                        </div>
+                      )}
+                      {finalCopInvested > 0 && (
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs text-gray-400">Total COP invertido</span>
+                          <span className="font-mono text-xs text-gray-400">
+                            ${finalCopInvested.toLocaleString('de-DE')} COP
                           </span>
                         </div>
                       )}
                       {rendimiento !== null && (
-                        <div className="flex justify-between items-center pt-2">
+                        <div className="flex justify-between items-center pt-1.5 border-t border-surface-border/30">
                           <span className="font-medium text-gray-400">Rendimiento</span>
                           <span className={`text-xl font-bold ${rendimiento >= 0
                             ? 'text-green-400 drop-shadow-[0_0_8px_rgba(74,222,128,0.5)]'
