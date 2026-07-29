@@ -14,7 +14,9 @@ interface UserBalance {
   BTCBalance?: number;
   btcBalance?: number;
   avgBuyPrice?: number;
+  avgBuyPriceUsdt?: number;
   totalCopInvested?: number;
+  totalUsdtInvested?: number;
   uid?: string;
 }
 
@@ -131,7 +133,9 @@ export default function AdminDashboard() {
             name: u.name || "Anonymous",
             BTCbalance: btc,
             avgBuyPrice: parseFloat((u.avgBuyPrice ?? 0).toString()),
+            avgBuyPriceUsdt: parseFloat((u.avgBuyPriceUsdt ?? 0).toString()),
             totalCopInvested: parseFloat((u.totalCopInvested ?? 0).toString()),
+            totalUsdtInvested: parseFloat((u.totalUsdtInvested ?? 0).toString()),
             uid: u.uid || key
           });
 
@@ -931,12 +935,15 @@ export default function AdminDashboard() {
                   <div className="bg-[#141A20]/50 border border-white/5 rounded-xl p-4 flex flex-col gap-1">
                     <span className="text-xs text-gray-400 uppercase font-medium">Avg Purchase Price</span>
                     <span className="text-lg font-bold font-mono text-white">
-                      {selectedUser.avgBuyPrice && selectedUser.avgBuyPrice > 0
-                        ? (usdtCop
-                          ? `$${Math.round(selectedUser.avgBuyPrice / usdtCop).toLocaleString()}`
-                          : "Calculating..."
+                      {selectedUser.avgBuyPriceUsdt && selectedUser.avgBuyPriceUsdt > 0
+                        ? `$${Math.round(selectedUser.avgBuyPriceUsdt).toLocaleString()}`
+                        : (selectedUser.avgBuyPrice && selectedUser.avgBuyPrice > 0
+                          ? (usdtCop
+                            ? `$${Math.round(selectedUser.avgBuyPrice / usdtCop).toLocaleString()}`
+                            : "Calculating..."
+                          )
+                          : "N/A"
                         )
-                        : "N/A"
                       }  <span className="text-xs text-gray-400">BTC/USDT</span>
                     </span>
                   </div>
