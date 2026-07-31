@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import '../../app/globals.css';
 import { ArrowLeftIcon, ArrowPathIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
 import { auth, database } from '../../app/lib/firebase';
-import { ref, onValue } from "firebase/database";
+import { ref, onValue, remove } from "firebase/database";
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useRouter } from 'next/navigation';
 
@@ -676,6 +676,21 @@ export default function AdminDashboard() {
   const selectedUserTransactions = selectedUser
     ? allTransactions.filter(tx => tx.uid === selectedUser.uid || tx.uid === selectedUser.id)
     : [];
+
+  const handleDeletePendingDeposit = async (uid: string, depositId: string) => {
+    if (!uid || !depositId) return;
+    const confirmed = window.confirm(`¿Estás seguro de eliminar el depósito pendiente (ID: ${depositId}) de la base de datos RTDB?`);
+    if (!confirmed) return;
+
+    try {
+      await remove(ref(database, `deposits/${uid}/${depositId}`));
+      await remove(ref(database, `deposits/all/${depositId}`));
+      console.log(`Successfully deleted pending deposit ${depositId} for user ${uid}`);
+    } catch (error) {
+      console.error("Error deleting pending deposit from RTDB:", error);
+      alert("Error al eliminar el depósito de RTDB. Por favor reintenta.");
+    }
+  };
 
   if (loadingAuth) {
     return (
@@ -1377,8 +1392,20 @@ export default function AdminDashboard() {
                           )}
                           <div className="flex justify-between items-center text-[10px] text-gray-400 border-t border-white/5 pt-2 mt-1">
                             <span>Order / Ref ID: <span className="font-mono text-gray-300 select-all">{tx.id}</span></span>
-                            <span className={`font-semibold uppercase ${tx.status === 'settled' || tx.status === 'success' ? 'text-green-400' : 'text-yellow-500'
-                              }`}>{tx.status}</span>
+                            <div className="flex items-center gap-2">
+                              {tx.type === 'deposit' && tx.status?.toLowerCase() === 'pending' && (
+                                <button
+                                  onClick={() => handleDeletePendingDeposit(tx.uid, tx.id)}
+                                  className="px-2 py-0.5 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-[10px] font-medium transition-all duration-200 flex items-center gap-1 active:scale-95"
+                                  title="Eliminar depósito pendiente de RTDB"
+                                >
+                                  <span>🗑️</span>
+                                  <span>Eliminar</span>
+                                </button>
+                              )}
+                              <span className={`font-semibold uppercase ${tx.status === 'settled' || tx.status === 'success' ? 'text-green-400' : 'text-yellow-500'
+                                }`}>{tx.status}</span>
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -1519,8 +1546,20 @@ export default function AdminDashboard() {
 
                     <div className="flex justify-between items-center text-[10px] text-gray-400 border-t border-white/5 pt-2 mt-1">
                       <span>User ID: <span className="font-mono text-gray-300">{tx.uid}</span></span>
-                      <span className={`font-semibold uppercase ${tx.status === 'settled' || tx.status === 'success' ? 'text-green-400' : 'text-yellow-500'
-                        }`}>{tx.status}</span>
+                      <div className="flex items-center gap-2">
+                        {tx.type === 'deposit' && tx.status?.toLowerCase() === 'pending' && (
+                          <button
+                            onClick={() => handleDeletePendingDeposit(tx.uid, tx.id)}
+                            className="px-2 py-0.5 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-[10px] font-medium transition-all duration-200 flex items-center gap-1 active:scale-95"
+                            title="Eliminar depósito pendiente de RTDB"
+                          >
+                            <span>🗑️</span>
+                            <span>Eliminar</span>
+                          </button>
+                        )}
+                        <span className={`font-semibold uppercase ${tx.status === 'settled' || tx.status === 'success' ? 'text-green-400' : 'text-yellow-500'
+                          }`}>{tx.status}</span>
+                      </div>
                     </div>
                   </div>
                 ))
