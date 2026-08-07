@@ -1,14 +1,19 @@
 // src/app/api/lndProxy/[...path]/route.ts
-import { NextRequest } from 'next/server';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { RateLimiterMemory } from 'rate-limiter-flexible'; // npm install (free lib)
 import { adminAuth } from '@/app/lib/firebase-admin'; // our initialized admin auth
+import { getAdminUidsServer } from '@/app/lib/auth-utils';
+import { jsonWithCors, handleCorsPreflight } from '@/app/lib/cors';
 
 
-const limiter = new RateLimiterMemory({ points: 10, duration: 60 }); // 10/min per IP
+const ipLimiter = new RateLimiterMemory({ points: 30, duration: 60 }); // 30/min per IP
+const userLimiter = new RateLimiterMemory({ points: 10, duration: 60 }); // 10/min per UID
+
+const MAX_INVOICE_AMOUNT_MSAT = 5_000_000_000; // 5 Billion msat = 5,000,000 sats (0.05 BTC)
 
 interface LndInvoiceRequest {
-  value_msat: number;
+  value_msat?: number | string;
+  value?: number | string;
   memo?: string;
   expiry?: string;
   private?: boolean;
@@ -20,17 +25,17 @@ interface LndInvoiceRequest {
 /* ------------------------------------------------------------------ */
 export async function POST(req: NextRequest) {
 
-  // Rate limit
+  // Rate limit by IP
   try {
-    await limiter.consume(req.headers.get('x-forwarded-for') || 'anonymous');
+    await ipLimiter.consume(req.headers.get('x-forwarded-for') || 'anonymous');
   } catch {
-    return new NextResponse(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429 });
+    return jsonWithCors({ error: 'IP rate limit exceeded' }, { status: 429 }, req);
   }
 
   // Authenticate request
   const authHeader = req.headers.get('Authorization');
   if (!authHeader?.startsWith('Bearer ')) {
-    return new NextResponse(JSON.stringify({ error: 'Unauthorized: No token' }), { status: 401 });
+    return jsonWithCors({ error: 'Unauthorized: No token' }, { status: 401 }, req);
   }
 
   const idToken = authHeader.split('Bearer ')[1];
@@ -38,20 +43,27 @@ export async function POST(req: NextRequest) {
   try {
     decodedToken = await adminAuth.verifyIdToken(idToken);
   } catch {
-    return new NextResponse(JSON.stringify({ error: 'Unauthorized: Invalid token' }), { status: 401 });
+    return jsonWithCors({ error: 'Unauthorized: Invalid token' }, { status: 401 }, req);
+  }
+
+  // Rate limit by User UID
+  try {
+    await userLimiter.consume(decodedToken.uid);
+  } catch {
+    return jsonWithCors({ error: 'User rate limit exceeded' }, { status: 429 }, req);
   }
 
   const { pathname, search } = new URL(req.url);
   const lndPath = pathname.replace(/^\/api\/lndProxy/, '') + search;
   const pathWithoutQuery = lndPath.split('?')[0];
 
-  const ADMIN_UIDS = ['5XgksHrgmyeGqqKFYGVjQVM0KGl1', 'VldgsZCsJaOTrFT2uR2YvXxUe7o1'];
-  const isAdmin = ADMIN_UIDS.includes(decodedToken.uid);
+  const adminUids = getAdminUidsServer();
+  const isAdmin = adminUids.includes(decodedToken.uid);
 
   if (!isAdmin) {
     const allowedPOST = ['/v1/invoices', '/v1/channels/transactions'];
     if (!allowedPOST.includes(pathWithoutQuery)) {
-      return new NextResponse(JSON.stringify({ error: 'Forbidden: Admin access required' }), { status: 403 });
+      return jsonWithCors({ error: 'Forbidden: Admin access required' }, { status: 403 }, req);
     }
   }
 
@@ -76,10 +88,23 @@ export async function POST(req: NextRequest) {
 
     console.log('Body:', payload);
      
+    // Validate value_msat for /v1/invoices endpoint
+    if (pathWithoutQuery === '/v1/invoices') {
+      const rawVal = payload?.value_msat ?? payload?.value;
+      const valueMsat = typeof rawVal === 'number' ? rawVal : typeof rawVal === 'string' ? parseInt(rawVal, 10) : NaN;
+
+      if (isNaN(valueMsat) || !Number.isFinite(valueMsat) || valueMsat <= 0 || valueMsat > MAX_INVOICE_AMOUNT_MSAT) {
+        return new NextResponse(
+          JSON.stringify({ error: 'Invalid invoice amount. Must be a positive integer up to 5,000,000,000 msat.' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+    }
+
     // Validate payment_request for /channels/transactions (payments) endpoint
-     if (lndPath.includes('/channels/transactions')) {
+    if (lndPath.includes('/channels/transactions')) {
       if (!payload?.payment_request?.match(/^ln(bc|tb|tc|regtest)[1-9a-zA-HJ-NP-Z]+$/i)) {
-      return new NextResponse(JSON.stringify({ error: 'Invalid payment request' }), { status: 400 });
+        return new NextResponse(JSON.stringify({ error: 'Invalid payment request' }), { status: 400 });
       }
     }
 
@@ -128,11 +153,11 @@ export async function POST(req: NextRequest) {
 /* ------------------------------------------------------------------ */
 export async function GET(req: NextRequest) {
 
-  // Rate limit
+  // Rate limit by IP
   try {
-    await limiter.consume(req.headers.get('x-forwarded-for') || 'anonymous');
+    await ipLimiter.consume(req.headers.get('x-forwarded-for') || 'anonymous');
   } catch {
-    return new NextResponse(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429 });
+    return new NextResponse(JSON.stringify({ error: 'IP rate limit exceeded' }), { status: 429 });
   }
 
   // Authenticate request
@@ -148,14 +173,21 @@ export async function GET(req: NextRequest) {
   } catch {
     return new NextResponse(JSON.stringify({ error: 'Unauthorized: Invalid token' }), { status: 401 });
   }
+
+  // Rate limit by User UID
+  try {
+    await userLimiter.consume(decodedToken.uid);
+  } catch {
+    return new NextResponse(JSON.stringify({ error: 'User rate limit exceeded' }), { status: 429 });
+  }
   // End authentication - start proxing request
   
   const { pathname, search } = new URL(req.url);
   const lndPath = pathname.replace(/^\/api\/lndProxy/, '') + search;
   const pathWithoutQuery = lndPath.split('?')[0];
 
-  const ADMIN_UIDS = ['5XgksHrgmyeGqqKFYGVjQVM0KGl1', 'VldgsZCsJaOTrFT2uR2YvXxUe7o1'];
-  const isAdmin = ADMIN_UIDS.includes(decodedToken.uid);
+  const adminUids = getAdminUidsServer();
+  const isAdmin = adminUids.includes(decodedToken.uid);
 
   if (!isAdmin) {
     const isInvoiceGet = pathWithoutQuery.startsWith('/v1/invoice/');
@@ -219,8 +251,12 @@ export async function GET(req: NextRequest) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  HEAD – for CORS preflight (optional but clean)                   */
+/*  OPTIONS & HEAD – CORS preflight handling                           */
 /* ------------------------------------------------------------------ */
-export async function HEAD() {
-  return new NextResponse(null, { status: 200 });
+export async function OPTIONS(req: NextRequest) {
+  return handleCorsPreflight(req);
+}
+
+export async function HEAD(req: NextRequest) {
+  return handleCorsPreflight(req);
 }

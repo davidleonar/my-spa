@@ -1,11 +1,12 @@
 // src/app/api/tapdProxy/[...path]/route.ts
-import { NextRequest } from 'next/server';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { RateLimiterMemory } from 'rate-limiter-flexible'; // npm install (free lib)
 import { adminAuth } from '@/app/lib/firebase-admin'; // our initialized admin auth
+import { jsonWithCors, handleCorsPreflight } from '@/app/lib/cors';
 
 
-const limiter = new RateLimiterMemory({ points: 10, duration: 60 }); // 10/min per IP
+const ipLimiter = new RateLimiterMemory({ points: 30, duration: 60 }); // 30/min per IP
+const userLimiter = new RateLimiterMemory({ points: 10, duration: 60 }); // 10/min per UID
 
 interface TapdRequest {
   // Generic interface; adjust based on specific endpoints if needed, but keep flexible for proxying
@@ -17,24 +18,32 @@ interface TapdRequest {
 /* ------------------------------------------------------------------ */
 export async function POST(req: NextRequest) {
 
-  // Rate limit
+  // Rate limit by IP
   try {
-    await limiter.consume(req.headers.get('x-forwarded-for') || 'anonymous');
+    await ipLimiter.consume(req.headers.get('x-forwarded-for') || 'anonymous');
   } catch {
-    return new NextResponse(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429 });
+    return jsonWithCors({ error: 'IP rate limit exceeded' }, { status: 429 }, req);
   }
 
   // Authenticate request
   const authHeader = req.headers.get('Authorization');
   if (!authHeader?.startsWith('Bearer ')) {
-    return new NextResponse(JSON.stringify({ error: 'Unauthorized: No token' }), { status: 401 });
+    return jsonWithCors({ error: 'Unauthorized: No token' }, { status: 401 }, req);
   }
 
   const idToken = authHeader.split('Bearer ')[1];
+  let decodedToken;
   try {
-    await adminAuth.verifyIdToken(idToken);
+    decodedToken = await adminAuth.verifyIdToken(idToken);
   } catch {
-    return new NextResponse(JSON.stringify({ error: 'Unauthorized: Invalid token' }), { status: 401 });
+    return jsonWithCors({ error: 'Unauthorized: Invalid token' }, { status: 401 }, req);
+  }
+
+  // Rate limit by User UID
+  try {
+    await userLimiter.consume(decodedToken.uid);
+  } catch {
+    return jsonWithCors({ error: 'User rate limit exceeded' }, { status: 429 }, req);
   }
   // Start proxing request
 
@@ -105,11 +114,11 @@ export async function POST(req: NextRequest) {
 /* ------------------------------------------------------------------ */
 export async function GET(req: NextRequest) {
 
-  // Rate limit
+  // Rate limit by IP
   try {
-    await limiter.consume(req.headers.get('x-forwarded-for') || 'anonymous');
+    await ipLimiter.consume(req.headers.get('x-forwarded-for') || 'anonymous');
   } catch {
-    return new NextResponse(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429 });
+    return new NextResponse(JSON.stringify({ error: 'IP rate limit exceeded' }), { status: 429 });
   }
 
   // Authenticate request
@@ -119,10 +128,18 @@ export async function GET(req: NextRequest) {
   }
 
   const idToken = authHeader.split('Bearer ')[1];
+  let decodedToken;
   try {
-    await adminAuth.verifyIdToken(idToken);
+    decodedToken = await adminAuth.verifyIdToken(idToken);
   } catch {
     return new NextResponse(JSON.stringify({ error: 'Unauthorized: Invalid token' }), { status: 401 });
+  }
+
+  // Rate limit by User UID
+  try {
+    await userLimiter.consume(decodedToken.uid);
+  } catch {
+    return new NextResponse(JSON.stringify({ error: 'User rate limit exceeded' }), { status: 429 });
   }
   // Start proxing request
 
@@ -178,11 +195,11 @@ export async function GET(req: NextRequest) {
 /* ------------------------------------------------------------------ */
 export async function DELETE(req: NextRequest) {
 
-  // Rate limit
+  // Rate limit by IP
   try {
-    await limiter.consume(req.headers.get('x-forwarded-for') || 'anonymous');
+    await ipLimiter.consume(req.headers.get('x-forwarded-for') || 'anonymous');
   } catch {
-    return new NextResponse(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429 });
+    return new NextResponse(JSON.stringify({ error: 'IP rate limit exceeded' }), { status: 429 });
   }
 
   // Authenticate request
@@ -192,10 +209,18 @@ export async function DELETE(req: NextRequest) {
   }
 
   const idToken = authHeader.split('Bearer ')[1];
+  let decodedToken;
   try {
-    await adminAuth.verifyIdToken(idToken);
+    decodedToken = await adminAuth.verifyIdToken(idToken);
   } catch {
     return new NextResponse(JSON.stringify({ error: 'Unauthorized: Invalid token' }), { status: 401 });
+  }
+
+  // Rate limit by User UID
+  try {
+    await userLimiter.consume(decodedToken.uid);
+  } catch {
+    return new NextResponse(JSON.stringify({ error: 'User rate limit exceeded' }), { status: 429 });
   }
 
   const { pathname, search } = new URL(req.url);
@@ -261,8 +286,12 @@ export async function DELETE(req: NextRequest) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  HEAD – for CORS preflight (optional but clean)                   */
+/*  OPTIONS & HEAD – CORS preflight handling                           */
 /* ------------------------------------------------------------------ */
-export async function HEAD() {
-  return new NextResponse(null, { status: 200 });
+export async function OPTIONS(req: NextRequest) {
+  return handleCorsPreflight(req);
+}
+
+export async function HEAD(req: NextRequest) {
+  return handleCorsPreflight(req);
 }

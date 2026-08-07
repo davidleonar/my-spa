@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import '../../app/globals.css';
 import { ArrowLeftIcon, ArrowPathIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
 import { auth, database } from '../../app/lib/firebase';
+import { isAdminUser } from '../../app/lib/auth-utils';
 import { ref, onValue, remove } from "firebase/database";
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { useRouter } from 'next/navigation';
@@ -101,10 +102,10 @@ export default function AdminDashboard() {
   const [manualWithdrawalSuccess, setManualWithdrawalSuccess] = useState<string | null>(null);
 
 
-  // Guard: Check admin authorization (Admin UID: '5XgksHrgmyeGqqKFYGVjQVM0KGl1')
+  // Guard: Check admin authorization
   useEffect(() => {
     if (!loadingAuth) {
-      if (!user || (user.uid !== '5XgksHrgmyeGqqKFYGVjQVM0KGl1' && user.uid !== 'VldgsZCsJaOTrFT2uR2YvXxUe7o1')) {
+      if (!isAdminUser(user?.uid)) {
         router.push('/');
       }
     }
@@ -112,7 +113,7 @@ export default function AdminDashboard() {
 
   // 1. Fetch Real-time RTDB Metrics
   useEffect(() => {
-    if (!user || (user.uid !== '5XgksHrgmyeGqqKFYGVjQVM0KGl1' && user.uid !== 'VldgsZCsJaOTrFT2uR2YvXxUe7o1')) return;
+    if (!isAdminUser(user?.uid)) return;
 
     const unsubscribes: Array<() => void> = [];
 
@@ -176,7 +177,7 @@ export default function AdminDashboard() {
 
   // 2. Fetch & Merge Chronological Transaction Log (Last 3)
   useEffect(() => {
-    if (!user || (user.uid !== '5XgksHrgmyeGqqKFYGVjQVM0KGl1' && user.uid !== 'VldgsZCsJaOTrFT2uR2YvXxUe7o1')) return;
+    if (!isAdminUser(user?.uid)) return;
 
     const unsubscribes: Array<() => void> = [];
 
@@ -358,7 +359,7 @@ export default function AdminDashboard() {
   };
 
   useEffect(() => {
-    if (user && (user.uid === '5XgksHrgmyeGqqKFYGVjQVM0KGl1' || user.uid === 'VldgsZCsJaOTrFT2uR2YvXxUe7o1')) {
+    if (isAdminUser(user?.uid)) {
       fetchLndBalances();
     }
   }, [user]);
@@ -700,7 +701,7 @@ export default function AdminDashboard() {
     );
   }
 
-  if (!user || (user.uid !== '5XgksHrgmyeGqqKFYGVjQVM0KGl1' && user.uid !== 'VldgsZCsJaOTrFT2uR2YvXxUe7o1')) {
+  if (!isAdminUser(user?.uid)) {
     return (
       <div className="flex flex-col justify-center items-center min-h-screen bg-[#0B0E11] text-white gap-4">
         <h1 className="text-3xl font-bold text-red-500">Access Denied</h1>

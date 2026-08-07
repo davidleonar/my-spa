@@ -26,9 +26,9 @@
     "firebase-admin": "^11.0.0",
     "firebase-functions": "^7.3.2",
     "html5-qrcode": "^2.3.8",
-    "next": "^15.3.1",
+    "next": "^15.5.23",
     "node-fetch": "^2.7.0",
-    "nodemailer": "^8.0.2",
+    "nodemailer": "^8.0.11",
     "qrcode.react": "^4.2.0",
     "rate-limiter-flexible": "^9.0.1",
     "react": "^19.0.0",
@@ -48,7 +48,7 @@
     "autoprefixer": "^10.4.21",
     "eslint": "^9",
     "eslint-config-next": "15.1.7",
-    "postcss": "^8.5.3",
+    "postcss": "^8.5.26",
     "tailwindcss": "^3.4.17",
     "typescript": "^5"
   },
@@ -61,6 +61,15 @@
       "sharp",
       "unrs-resolver",
       "utf-8-validate"
-    ]
+    ],
+    "overrides": {
+      "protobufjs": "^7.6.5",
+      "postcss": "^8.5.26",
+      "ws": "^8.21.0",
+      "uuid": "^11.1.1",
+      "axios": "^1.18.0",
+      "js-yaml": "^4.3.1",
+      "brace-expansion": "^2.1.4"
+    }
   }
 }
