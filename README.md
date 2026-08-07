@@ -12,7 +12,7 @@ A modern, high-performance web application (SPA) enabling individuals and enterp
 - **Automated Fiat-to-Bitcoin Purchasing**: Integrates real-time banking webhooks (e.g., Bancolombia deposit webhooks) that automatically convert incoming fiat deposits (>= 10 USDT equivalent) into Bitcoin (BTC) via automated market buy orders.
 - **Dual-Layer Bitcoin Support**: Operates natively on both **Bitcoin Layer 1 (On-Chain Bech32 Native Segwit)** and **Bitcoin Layer 2 (Lightning Network)**.
 - **High-Frequency Market Streaming**: Connects directly to Binance WebSockets for zero-latency live `BTC/USDT` and `USDT/COP` price feeds.
-- **Atomic Balance & Yield Accounting**: Serverless backend Cloud Functions powered by atomic database transactions ensure sub-millisecond ledger consistency for user balances, weighted average purchase prices (`avgBuyPrice`), and real-time yield percentage calculation.
+- **Atomic Balance & Yield Accounting**: Serverless backend Cloud Functions powered by atomic database transactions ensure sub-millisecond ledger consistency for user balances, tracking total invested capital (`totalCopInvested` and `totalUsdtInvested`), maintaining proportional cost-basis reduction on withdrawals, weighted average purchase prices (`avgBuyPrice` in COP and `avgBuyPriceUsdt` in USD), and real-time yield percentage calculation.
 - **Enterprise Admin Console**: Admin dashboard providing real-time liquidity monitoring across Lightning channels and On-Chain reserves, user profile management, fee metrics, and full transaction audit receipts.
 
 ---
