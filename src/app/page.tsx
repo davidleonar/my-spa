@@ -1471,18 +1471,33 @@ export default function Home() {
     setScannerError(null);
     try {
       const idToken = await auth.currentUser?.getIdToken();
-      const payRes = await fetch('/api/lndProxy/v1/channels/transactions', {
+      const payRes = await fetch('/api/lndProxy/v2/router/send', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${idToken || ''}`
         },
-        body: JSON.stringify({ payment_request: withdrawalBolt11 }),
+        body: JSON.stringify({ 
+          payment_request: withdrawalBolt11,
+          fee_limit_sat: Math.max(100, Math.ceil(withdrawalQuote.amountSats * 0.02)), // Allow up to 2% routing fee
+          timeout_seconds: 60
+        }),
       });
 
       if (!payRes.ok) {
         const text = await payRes.text();
-        throw new Error(text || 'Error al procesar el pago.');
+        let errMsg = text || 'Error al procesar el pago.';
+        try {
+          const parsed = JSON.parse(text);
+          if (parsed.error && parsed.error.message) {
+            errMsg = parsed.error.message;
+          } else if (parsed.message) {
+            errMsg = parsed.message;
+          }
+        } catch {
+          // ignore json parse error
+        }
+        throw new Error(errMsg);
       }
 
       const payData = await payRes.json();
@@ -1490,6 +1505,20 @@ export default function Home() {
 
       if (payData.payment_error) {
         throw new Error(payData.payment_error);
+      }
+      if (payData.status === 'FAILED' || (payData.failure_reason && payData.failure_reason !== 'FAILURE_REASON_NONE')) {
+        const reason = payData.failure_reason || '';
+        let userFriendlyMsg = 'El pago por Lightning ha fallado.';
+        if (reason.includes('FAILURE_REASON_NO_ROUTE')) {
+          userFriendlyMsg = 'No se encontró una ruta de pago en Lightning Network para esta factura. Verifica que el nodo destino esté activo y tenga canales abiertos.';
+        } else if (reason.includes('FAILURE_REASON_INSUFFICIENT_BALANCE')) {
+          userFriendlyMsg = 'Saldo o liquidez de canal insuficiente para completar el pago.';
+        } else if (reason.includes('FAILURE_REASON_TIMEOUT')) {
+          userFriendlyMsg = 'Tiempo de espera agotado al intentar enrutar el pago.';
+        } else if (reason) {
+          userFriendlyMsg = `Error en el pago Lightning: ${reason}`;
+        }
+        throw new Error(userFriendlyMsg);
       }
 
       // Success!
