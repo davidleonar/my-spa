@@ -4,6 +4,8 @@ import { RateLimiterMemory } from 'rate-limiter-flexible'; // npm install (free 
 import { adminAuth } from '@/app/lib/firebase-admin'; // our initialized admin auth
 import { jsonWithCors, handleCorsPreflight } from '@/app/lib/cors';
 
+export const dynamic = 'force-dynamic';
+
 
 const ipLimiter = new RateLimiterMemory({ points: 30, duration: 60 }); // 30/min per IP
 const userLimiter = new RateLimiterMemory({ points: 10, duration: 60 }); // 10/min per UID
