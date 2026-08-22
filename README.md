@@ -131,9 +131,12 @@ pnpm run deploy
 
 ## 🔐 Security & Compliance
 
-- **Zero-Trust LND Proxy**: Restricted RPC endpoint whitelisting prevents unauthorized node operations.
-- **Atomic Balance Mutex**: All balance modifications are strictly governed by backend database transactions in Cloud Functions (`onDepositSettled`, `notifyWithdrawalSettled`).
-- **Secret Manager**: Sensitive macaroons, SMTP credentials, and API secrets are stored securely in Google Cloud Secret Manager.
+- **Zero-Trust LND Proxy & Firewall Protection**: Restricted RPC endpoint whitelisting prevents unauthorized node operations. Proxy VM port 3000 ingress is strictly restricted to Tailscale CIDRs, internal VPCs, and Google Cloud Functions IP ranges.
+- **Atomic Balance Mutex**: All balance modifications and withdrawal reservations are strictly governed by atomic database transactions in Cloud Functions (`processOnChainWithdrawal`, `onDepositSettled`, `notifyWithdrawalSettled`), featuring automatic balance rollback on broadcast failures.
+- **Strict Realtime Database Rules**: Read permissions on `/balances` are restricted exclusively to authenticated account owners (`$uid === auth.uid`) and authorized admins, with client write access completely disabled (`.write: false`).
+- **Secret Manager & Un-Hardcoded Environment**: Sensitive macaroons, SMTP credentials, and API secrets are stored in Google Cloud Secret Manager and supplied to proxy daemons strictly via environment variables (`process.env`).
+- **Constant-Time Auth & Idempotency**: Bancolombia deposit webhooks use `crypto.timingSafeEqual` header checks, SHA-256 deduplication hashing (`processedWebhooks/{hash}`), and multi-candidate name ambiguity checks to prevent automated misattributions.
+- **Hosting Security Headers**: Global `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Strict-Transport-Security`, `Referrer-Policy`, and `Content-Security-Policy` protections configured across Firebase Hosting.
 
 ---
 
