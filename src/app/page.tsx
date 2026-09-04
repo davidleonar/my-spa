@@ -80,21 +80,52 @@ interface BankDeposit {
   saldoCop?: number;
   uid?: string;
   depositId: string;
-  parsedName: string;
-  amount: string;
-  date: string;
-  time: string;
+  parsedName?: string;
+  amount?: string | number;
+  date?: string;
+  time?: string;
   status: string;
   timestamp?: number;
   userNotified?: boolean;
   adminNotified?: boolean;
+  type?: string;
+  address?: string;
+  btcBought?: number;
+  confirmations?: number;
+  txid?: string;
   marketBuy?: {
     btcBought: number;
-    usdtSpent: number;
-    orderId: number;
+    usdtSpent?: number;
+    orderId?: number;
     usdtCopPrice?: number;
     btcUsdtPrice?: number;
   };
+}
+
+interface DepositIntent {
+  id: string;
+  uid: string;
+  amount: number;
+  senderName: string;
+  reference: string;
+  status: 'pending' | 'settled' | 'cancelled' | 'superseded';
+  breBKey?: string;
+  createdAt: number;
+  expiresAt: number;
+}
+
+interface AppNotification {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  amountBtc?: number;
+  amountCop?: number;
+  amountSats?: number;
+  txid?: string;
+  reference?: string;
+  timestamp: number;
+  read: boolean;
 }
 
 export default function Home() {
@@ -184,6 +215,12 @@ export default function Home() {
 
   // States for COP Depositos and Retiros
   const [showCopDepositos, setShowCopDepositos] = useState<boolean>(false);
+  const [copDepositAmount, setCopDepositAmount] = useState<string>('');
+  const [copSenderName, setCopSenderName] = useState<string>('');
+  const [activeDepositIntent, setActiveDepositIntent] = useState<DepositIntent | null>(null);
+  const [creatingIntent, setCreatingIntent] = useState<boolean>(false);
+  const [intentError, setIntentError] = useState<string | null>(null);
+  const [cancellingIntent, setCancellingIntent] = useState<boolean>(false);
   const [showCopRetiros, setShowCopRetiros] = useState<boolean>(false);
   const [showBtcLightningWithdrawal, setShowBtcLightningWithdrawal] = useState<boolean>(false);
   const [copRetirosAmount, setCopRetirosAmount] = useState<string>('');
@@ -226,6 +263,8 @@ export default function Home() {
   const [allUserWithdrawals, setAllUserWithdrawals] = useState<BankWithdrawal[]>([]);
   const [allUserDeposits, setAllUserDeposits] = useState<BankDeposit[]>([]);
   const [allAdminDeposits, setAllAdminDeposits] = useState<BankDeposit[]>([]);
+  const [appNotifications, setAppNotifications] = useState<AppNotification[]>([]);
+  const [unreadNotifCount, setUnreadNotifCount] = useState<number>(0);
 
   // Para el rendering automatico
   useEffect(() => {
@@ -453,12 +492,51 @@ export default function Home() {
         setAvgBuyPriceUsdt(userBalance.avgBuyPriceUsdt || 0);
         setTotalCopInvested(userBalance.totalCopInvested || 0);
         setBtcDepositAddress(userBalance.btcDepositAddress || null);
+        if (userBalance.name) {
+          setCopSenderName((prev) => (prev ? prev : userBalance.name));
+        }
       } else {
         setSyncBtcBalance(0);
         setBtcDepositAddress(null);
       }
     });
     unsubscribes.push(unsubscribeB);
+
+    const userIntentsRef = ref(database, `depositIntents/${user.uid}`);
+    const unsubscribeIntents = onValue(userIntentsRef, (snapshot) => {
+      let active: DepositIntent | null = null;
+      const now = Date.now();
+      if (snapshot.exists()) {
+        snapshot.forEach((snap) => {
+          const data = snap.val();
+          if (data && data.status === 'pending' && (!data.expiresAt || data.expiresAt > now)) {
+            active = { id: snap.key!, ...data };
+          }
+        });
+      }
+      setActiveDepositIntent(active);
+    }, (error) => console.error('depositIntents onValue error:', error));
+    unsubscribes.push(unsubscribeIntents);
+
+    const userNotifsRef = ref(database, `notifications/${user.uid}`);
+    const unsubscribeNotifs = onValue(userNotifsRef, (snapshot) => {
+      const notifs: AppNotification[] = [];
+      let unread = 0;
+      if (snapshot.exists()) {
+        snapshot.forEach((snap) => {
+          const data = snap.val();
+          if (data) {
+            notifs.push({ id: snap.key!, ...data });
+            if (!data.read) {
+              unread++;
+            }
+          }
+        });
+      }
+      setAppNotifications(notifs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)));
+      setUnreadNotifCount(unread);
+    }, (error) => console.error('notifications onValue error:', error));
+    unsubscribes.push(unsubscribeNotifs);
 
     return () => {
       unsubscribes.forEach((unsub) => unsub());
@@ -484,7 +562,25 @@ export default function Home() {
 
   const handleUserBellClick = async () => {
     setShowNotificationsModal(true);
-    if ((userUnreadNotifications.length === 0 && userUnreadDeposits.length === 0) || !user) return;
+    if (!user) return;
+
+    // Mark unread in-app notifications as read in RTDB
+    if (appNotifications.some((n) => !n.read)) {
+      try {
+        const notifUpdates: { [key: string]: boolean } = {};
+        appNotifications.forEach((n) => {
+          if (!n.read) {
+            notifUpdates[`notifications/${user.uid}/${n.id}/read`] = true;
+          }
+        });
+        await update(ref(database), notifUpdates);
+        setUnreadNotifCount(0);
+      } catch (err) {
+        console.error('Failed to mark notifications as read', err);
+      }
+    }
+
+    if (userUnreadNotifications.length === 0 && userUnreadDeposits.length === 0) return;
 
     // Mark them as notified
     try {
@@ -697,6 +793,82 @@ export default function Home() {
 
 
   /* ------------------------------------------------------------------ */
+  /*  COP Deposit Intent Actions                                        */
+  /* ------------------------------------------------------------------ */
+  const handleCreateDepositIntent = async () => {
+    setIntentError(null);
+    const numericVal = parseInt(copDepositAmount.replace(/\D/g, ''), 10);
+    if (isNaN(numericVal) || numericVal < 5000) {
+      setIntentError('El monto mínimo de depósito es $5.000 COP.');
+      return;
+    }
+    if (numericVal > 50000000) {
+      setIntentError('El monto máximo por depósito es $50.000.000 COP.');
+      return;
+    }
+
+    setCreatingIntent(true);
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) throw new Error('Usuario no autenticado.');
+
+      const res = await fetch('/api/createDepositIntent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`
+        },
+        body: JSON.stringify({
+          amount: numericVal,
+          senderName: copSenderName.trim()
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Error al registrar la intención.');
+      }
+
+      setActiveDepositIntent(data.intent);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error de conexión.';
+      setIntentError(msg);
+    } finally {
+      setCreatingIntent(false);
+    }
+  };
+
+  const handleCancelDepositIntent = async (intentId: string) => {
+    setCancellingIntent(true);
+    setIntentError(null);
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) throw new Error('Usuario no autenticado.');
+
+      const res = await fetch('/api/cancelDepositIntent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`
+        },
+        body: JSON.stringify({ intentId })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Error al cancelar la intención.');
+      }
+
+      setActiveDepositIntent(null);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error al cancelar.';
+      setIntentError(msg);
+    } finally {
+      setCancellingIntent(false);
+    }
+  };
+
+  /* ------------------------------------------------------------------ */
   /*  Generar la factura                                                */
   /* ------------------------------------------------------------------ */
   const generateDonationInvoice = async () => {
@@ -796,65 +968,71 @@ export default function Home() {
   };
 
   useEffect(() => {
+    if (!savingsPaymentHash || !user) return;
+
     let interval: NodeJS.Timeout;
     let timeout: NodeJS.Timeout;
 
-    if (savingsPaymentHash && savingsPaymentStatus === 'pending') {
+    // 1. Real-time RTDB listener on the user's invoice node
+    const invoiceRef = ref(database, `invoices/${user.uid}/${savingsPaymentHash}`);
+    const unsubscribe = onValue(invoiceRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const inv = snapshot.val();
+        if (inv.status === 'settled') {
+          setSavingsPaymentStatus('settled');
+          setTimeout(() => {
+            resetSavings();
+            setShowBtcLightningDeposit(false);
+          }, 4000);
+        } else if (inv.status === 'expired') {
+          setSavingsPaymentStatus(null);
+          setSavingsError('La factura ha expirado.');
+        }
+      }
+    });
+
+    // 2. Periodic fast settlement verification while waiting
+    if (savingsPaymentStatus === 'pending') {
       interval = setInterval(async () => {
         try {
           const idToken = await auth.currentUser?.getIdToken();
-          const res = await fetch(`/api/lndProxy/v1/invoice/${savingsPaymentHash}`, {
+          if (!idToken) return;
+
+          const res = await fetch('https://us-central1-rendimientos-5dbb9.cloudfunctions.net/checkInvoiceSettlement', {
+            method: 'POST',
             headers: {
-              'Authorization': `Bearer ${idToken || ''}`
-            }
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${idToken}`
+            },
+            body: JSON.stringify({ paymentHash: savingsPaymentHash })
           });
-          if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to check invoice`);
 
-          const invoice: InvoiceStatus = await res.json();
-
-          if (invoice.settled) {
-            setSavingsPaymentStatus('settled');
-            console.log('Savings settled! Amount:', invoice.amt_paid_sat, 'sats');
-
-            if (user) {
-              const btcAmount = Number(invoice.amt_paid_sat) / 100_000_000;
-              const depositData = {
-                uid: user.uid,
-                depositId: savingsPaymentHash,
-                parsedName: "BTC Lightning Deposit",
-                status: "settled",
-                timestamp: Date.now(),
-                marketBuy: {
-                  btcBought: btcAmount,
-                  btcUsdtPrice: liveBtcUsdt || 0,
-                  usdtCopPrice: liveUsdtCop || 0
-                }
-              };
-              await set(ref(database, `deposits/${user.uid}/${savingsPaymentHash}`), depositData);
+          if (res.ok) {
+            const result = await res.json();
+            if (result.settled) {
+              setSavingsPaymentStatus('settled');
+              setTimeout(() => {
+                resetSavings();
+                setShowBtcLightningDeposit(false);
+              }, 4000);
             }
-
-            setTimeout(() => {
-              resetSavings();
-              setShowBtcLightningDeposit(false);
-            }, 4000);
           }
         } catch (error) {
-          console.error('Check savings status error:', error);
-          setSavingsError('Failed to check payment status');
+          console.warn('Check savings settlement error:', error);
         }
-      }, 10000);
+      }, 4000);
 
       timeout = setTimeout(() => {
-        setSavingsPaymentStatus(null);
-        setSavingsError('Savings check timed out');
         clearInterval(interval);
-      }, 300000);
+      }, 3600000); // 1 hour
     }
+
     return () => {
-      clearInterval(interval);
-      clearTimeout(timeout);
+      unsubscribe();
+      if (interval) clearInterval(interval);
+      if (timeout) clearTimeout(timeout);
     };
-  }, [savingsPaymentHash, savingsPaymentStatus, resetSavings, user, liveBtcUsdt, liveUsdtCop]);
+  }, [savingsPaymentHash, savingsPaymentStatus, resetSavings, user]);
 
   const generateSavingsInvoice = async () => {
     if (savingsAmount <= 0) {
@@ -866,41 +1044,37 @@ export default function Home() {
     setSavingsLoading(true);
 
     try {
-      const value_msat = savingsAmount * 1000;
-      const body = {
-        value_msat: value_msat,
-        memo: `Savings from${user ? ` ${user.displayName}` : ''}`,
-        expiry: '300',
-        private: false,
-        add_index: 1,
-      };
       const idToken = await auth.currentUser?.getIdToken();
-      console.log('Sending savings request:', body);
-      const res = await fetch('/api/lndProxy/v1/invoices', {
+      if (!idToken) throw new Error('No se encontró sesión de usuario autenticado');
+
+      console.log('Requesting server-side Lightning invoice for sats:', savingsAmount);
+      const res = await fetch('https://us-central1-rendimientos-5dbb9.cloudfunctions.net/createInvoice', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken || ''}`
+          'Authorization': `Bearer ${idToken}`
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          amountSats: savingsAmount,
+          memo: `Savings from ${user?.displayName || 'User'}`
+        }),
       });
 
       if (!res.ok) {
-        const errorText = await res.text();
-        console.error('Proxy error:', errorText);
-        throw new Error(`Server error: ${res.status}`);
+        const errJson = await res.json().catch(() => ({ error: `Server error: ${res.status}` }));
+        throw new Error(errJson.error || `Server error: ${res.status}`);
       }
 
       const data = await res.json();
-      console.log("LND response:", data);
+      console.log("Server createInvoice response:", data);
 
-      if (data.payment_request) {
-        setSavingsBolt11(data.payment_request);
-        setSavingsPaymentHash(Buffer.from(data.r_hash, 'base64').toString('hex'));
+      if (data.bolt11 && data.paymentHash) {
+        setSavingsBolt11(data.bolt11);
+        setSavingsPaymentHash(data.paymentHash);
         setSavingsPaymentStatus("pending");
-        console.log("Set savings bolt11:", data.payment_request);
+        console.log("Invoice created successfully. Payment hash:", data.paymentHash);
       } else {
-        throw new Error("No payment_request in LND response");
+        throw new Error("Respuesta inválida del servidor de facturas");
       }
 
     } catch (e: unknown) {
@@ -1471,89 +1645,33 @@ export default function Home() {
     setScannerError(null);
     try {
       const idToken = await auth.currentUser?.getIdToken();
-      const payRes = await fetch('/api/lndProxy/v2/router/send', {
+      if (!idToken) throw new Error('No se encontró sesión de usuario autenticado');
+
+      const res = await fetch('https://us-central1-rendimientos-5dbb9.cloudfunctions.net/processLightningWithdrawal', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken || ''}`
+          'Authorization': `Bearer ${idToken}`
         },
         body: JSON.stringify({ 
-          payment_request: withdrawalBolt11,
-          fee_limit_sat: Math.max(100, Math.ceil(withdrawalQuote.amountSats * 0.02)), // Allow up to 2% routing fee
-          timeout_seconds: 60
+          payment_request: withdrawalBolt11
         }),
       });
 
-      if (!payRes.ok) {
-        const text = await payRes.text();
-        let errMsg = text || 'Error al procesar el pago.';
-        try {
-          const parsed = JSON.parse(text);
-          if (parsed.error && parsed.error.message) {
-            errMsg = parsed.error.message;
-          } else if (parsed.message) {
-            errMsg = parsed.message;
-          }
-        } catch {
-          // ignore json parse error
-        }
-        throw new Error(errMsg);
+      if (!res.ok) {
+        const errorJson = await res.json().catch(() => ({ error: `Error del servidor (${res.status})` }));
+        throw new Error(errorJson.error || `Error del servidor (${res.status})`);
       }
 
-      const payData = await payRes.json();
-      console.log('LND payment data:', payData);
-
-      if (payData.payment_error) {
-        throw new Error(payData.payment_error);
-      }
-      if (payData.status === 'FAILED' || (payData.failure_reason && payData.failure_reason !== 'FAILURE_REASON_NONE')) {
-        const reason = payData.failure_reason || '';
-        let userFriendlyMsg = 'El pago por Lightning ha fallado.';
-        if (reason.includes('FAILURE_REASON_NO_ROUTE')) {
-          userFriendlyMsg = 'No se encontró una ruta de pago en Lightning Network para esta factura. Verifica que el nodo destino esté activo y tenga canales abiertos.';
-        } else if (reason.includes('FAILURE_REASON_INSUFFICIENT_BALANCE')) {
-          userFriendlyMsg = 'Saldo o liquidez de canal insuficiente para completar el pago.';
-        } else if (reason.includes('FAILURE_REASON_TIMEOUT')) {
-          userFriendlyMsg = 'Tiempo de espera agotado al intentar enrutar el pago.';
-        } else if (reason) {
-          userFriendlyMsg = `Error en el pago Lightning: ${reason}`;
-        }
-        throw new Error(userFriendlyMsg);
-      }
-
-      // Success!
-      const requestedBtc = withdrawalQuote.amountSats / 100000000;
-      const fee = (withdrawalQuote.baseFee + withdrawalQuote.partnerFee) / 100000000;
-      const copEquivalent = Math.round(requestedBtc * (liveBtcUsdt || 0) * (liveUsdtCop || 0));
-
-      const withdrawalData: Omit<BankWithdrawal, 'requestId'> = {
-        uid: user.uid,
-        userEmail: user.email || 'email',
-        name: user.displayName || 'Unknown',
-        amount: copEquivalent, // COP equivalent of satoshis
-        requestedBtcAmount: requestedBtc,
-        fee: fee,
-        totalBtcToDeduct: totalBtcToDeduct,
-        bankData: withdrawalBolt11,
-        bankName: 'Bitcoin Lightning',
-        option: 'btcLightning',
-        timestamp: Date.now(),
-        status: 'settled',
-        receipt: {
-          btcUsdt: liveBtcUsdt || 0,
-          usdtCop: liveUsdtCop || 0
-        }
-      };
-
-      const refPath = `withdrawals/${user.uid}`;
-      const newRef = push(ref(database, refPath));
-      await set(newRef, withdrawalData);
+      const result = await res.json();
+      console.log('Lightning withdrawal successful:', result);
 
       setWithdrawalPaymentStatus('success');
 
     } catch (err) {
       setWithdrawalPaymentStatus('failure');
-      setScannerError(err instanceof Error ? err.message : 'Payment failed');
+      const errMsg = err instanceof Error ? err.message : 'Error al procesar el retiro Lightning';
+      setScannerError(errMsg);
       console.error('Payment error:', err);
     }
   };
@@ -1647,9 +1765,9 @@ export default function Home() {
                 // User Bell
                 <button onClick={handleUserBellClick} className="relative p-2 bg-white/5 hover:bg-white/10 rounded-full transition-colors active:scale-95 text-gray-300 hover:text-white border border-surface-border">
                   <BellIcon className="w-6 h-6" />
-                  {(userUnreadNotifications.length > 0 || userUnreadDeposits.length > 0) && (
+                  {(unreadNotifCount > 0 || userUnreadNotifications.length > 0 || userUnreadDeposits.length > 0) && (
                     <span className="absolute top-0 right-0 transform translate-x-1/4 -translate-y-1/4 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white shadow-lg ring-2 ring-surface">
-                      {userUnreadNotifications.length + userUnreadDeposits.length}
+                      {unreadNotifCount + userUnreadNotifications.length + userUnreadDeposits.length}
                     </span>
                   )}
                 </button>
@@ -1817,20 +1935,138 @@ export default function Home() {
               {showCopDepositos && (
                 <div className="mt-4 bg-black/40 border border-surface-border p-6 rounded-2xl shadow-lg backdrop-blur-sm animate-fade-in">
                   <h3 className="text-xl font-bold mb-4 text-white flex items-center gap-2">
-                    <span className="text-emerald-400">Depositar con Bre-B</span>
+                    <span className="text-emerald-400">🇨🇴 Depósitos en COP (Bre-B / Bancolombia)</span>
                   </h3>
-                  <div className="mt-4 text-center flex flex-col items-center">
+
+                  {activeDepositIntent ? (
+                    <div className="bg-emerald-950/40 border border-emerald-500/40 p-5 rounded-2xl animate-fade-in mb-6 text-left">
+                      <div className="flex items-center justify-between border-b border-emerald-500/20 pb-3 mb-3">
+                        <span className="text-emerald-400 font-bold text-sm flex items-center gap-2">
+                          <span className="inline-block animate-spin text-base">⏳</span> Esperando Transferencia Bancaria
+                        </span>
+                        <span className="text-xs font-mono bg-emerald-500/20 text-emerald-300 px-2.5 py-0.5 rounded-full border border-emerald-500/30">
+                          {activeDepositIntent.reference}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 text-xs mb-4">
+                        <div>
+                          <p className="text-gray-400">Monto Esperado</p>
+                          <p className="text-xl font-bold text-white">${activeDepositIntent.amount.toLocaleString('de-DE')} COP</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-400">Titular Remitente</p>
+                          <p className="text-sm font-semibold text-emerald-200 truncate">{activeDepositIntent.senderName}</p>
+                        </div>
+                      </div>
+
+                      <div className="bg-black/40 p-3 rounded-xl border border-emerald-500/20 mb-4">
+                        <label className="block text-[11px] font-medium text-gray-400 mb-1">Transferir a Llave Bre-B</label>
+                        <div className="flex justify-between items-center">
+                          <span className="text-lg font-mono font-bold text-white tracking-wider">0092325247</span>
+                          <button
+                            onClick={() => {
+                              if (navigator.clipboard && navigator.clipboard.writeText) {
+                                navigator.clipboard.writeText("0092325247");
+                                setCopiedBancos(true);
+                                setTimeout(() => setCopiedBancos(false), 2000);
+                              }
+                            }}
+                            className="px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-300 text-xs rounded-lg transition-all flex items-center gap-1"
+                          >
+                            <DocumentDuplicateIcon className="w-4 h-4" />
+                            <span>{copiedBancos ? '¡Copiado!' : 'Copiar'}</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      <p className="text-xs text-emerald-200/80 mb-4 leading-relaxed">
+                        Transfiere exactamente <strong>${activeDepositIntent.amount.toLocaleString('de-DE')} COP</strong> desde tu app bancaria hacia la llave Bre-B arriba. El sistema acreditará automáticamente tu depósito tras recibir la notificación de Bancolombia.
+                      </p>
+
+                      <div className="flex justify-end">
+                        <button
+                          onClick={() => handleCancelDepositIntent(activeDepositIntent.id)}
+                          disabled={cancellingIntent}
+                          className="text-xs text-red-400 hover:text-red-300 underline transition-all disabled:opacity-50"
+                        >
+                          {cancellingIntent ? 'Cancelando...' : 'Cancelar intención de depósito'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mb-6 text-left">
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium text-gray-300 mb-1">Monto a depositar (COP)</label>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            placeholder="Ej. 50.000"
+                            value={copDepositAmount}
+                            onChange={(e) => {
+                              const raw = e.target.value.replace(/\D/g, '');
+                              const num = parseInt(raw, 10);
+                              setCopDepositAmount(!isNaN(num) && raw !== '' ? num.toLocaleString('de-DE') : '');
+                            }}
+                            className="w-full p-3.5 bg-gray-900/90 border border-gray-700 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-xl text-white font-medium text-base placeholder-gray-500 outline-none transition-all pr-14"
+                          />
+                          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-sm pointer-events-none">COP</span>
+                        </div>
+                      </div>
+
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium text-gray-300 mb-1">
+                          Nombre del Titular de la cuenta bancaria <span className="text-xs text-gray-400">(Remitente)</span>
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Tu nombre o titular remitente"
+                          value={copSenderName}
+                          onChange={(e) => setCopSenderName(e.target.value)}
+                          className="w-full p-3.5 bg-gray-900/90 border border-gray-700 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-xl text-white font-medium text-base placeholder-gray-500 outline-none transition-all"
+                        />
+                        <p className="text-[11px] text-gray-400 mt-1">
+                          Si transfieres desde la cuenta de un familiar o empresa, escribe aquí su nombre tal como aparece en el banco.
+                        </p>
+                      </div>
+
+                      {intentError && (
+                        <div className="mb-4 p-3 bg-red-500/20 border border-red-500/50 rounded-xl text-red-300 text-xs">
+                          {intentError}
+                        </div>
+                      )}
+
+                      <button
+                        onClick={handleCreateDepositIntent}
+                        disabled={creatingIntent || !copDepositAmount}
+                        className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 disabled:opacity-50 text-white font-bold rounded-xl shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                      >
+                        {creatingIntent ? (
+                          <>
+                            <span className="inline-block animate-spin">⏳</span>
+                            <span>Registrando...</span>
+                          </>
+                        ) : (
+                          <span>Registrar Notificación de Depósito</span>
+                        )}
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="mt-6 pt-6 border-t border-white/10 text-center flex flex-col items-center">
+                    <p className="text-xs text-gray-400 mb-4">También puedes escanear el código QR directamente desde tu aplicación bancaria:</p>
                     <Image
                       src="/QR_rendimientos.jpg"
                       alt="QR COP Depositos"
-                      width={300}
-                      height={300}
-                      className="rounded-lg mb-6 shadow-[0_0_15px_rgba(255,255,255,0.1)]"
+                      width={240}
+                      height={240}
+                      className="rounded-lg mb-4 shadow-[0_0_15px_rgba(255,255,255,0.1)]"
                     />
-                    <div className="w-full max-w-xs mb-4">
-                      <label className="block text-sm font-medium text-gray-300 mb-1 text-left">Bre-B Key</label>
-                      <div className="flex justify-between items-center bg-gray-900/80 border border-gray-700 rounded-xl px-4 py-3 shadow-sm transition-all hover:bg-gray-800/80">
-                        <span className="text-lg font-medium font-mono text-gray-200 tracking-wider">0092325247</span>
+                    <div className="w-full max-w-xs mb-2">
+                      <label className="block text-xs font-medium text-gray-400 mb-1 text-left">Llave Bre-B permanente</label>
+                      <div className="flex justify-between items-center bg-gray-900/80 border border-gray-700 rounded-xl px-4 py-2.5 shadow-sm">
+                        <span className="text-base font-medium font-mono text-gray-200 tracking-wider">0092325247</span>
                         <button
                           onClick={() => {
                             if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -1839,15 +2075,14 @@ export default function Home() {
                               setTimeout(() => setCopiedBancos(false), 2000);
                             }
                           }}
-                          className="p-2 bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-400 rounded-lg transition-all active:scale-95"
+                          className="p-1.5 bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-400 rounded-lg transition-all"
                           title="Copiar Bre-B Key"
                         >
-                          <DocumentDuplicateIcon className="w-5 h-5" />
+                          <DocumentDuplicateIcon className="w-4 h-4" />
                         </button>
                       </div>
-                      {copiedBancos && <p className="mt-2 text-sm text-green-400 font-medium">¡Copiado!</p>}
+                      {copiedBancos && <p className="mt-1 text-xs text-green-400 font-medium">¡Copiado!</p>}
                     </div>
-                    <p className="text-sm mt-2 text-gray-300">Escanea este codigo QR o copia esta llave para realizar transferencias desde cualquier banco en Colombia. Una vez realizada la transferencia, enviar el comprobante haciendo click en &apos;Contacto&apos;.</p>
                   </div>
                 </div>
               )}
@@ -1989,6 +2224,34 @@ export default function Home() {
                           {copiedAddress ? '¡Copiado!' : 'Copiar'}
                         </button>
                       </div>
+
+                      {allUserDeposits.filter(d => (d.type === 'onchain_deposit' || d.address) && d.status === 'pending').map((dep) => (
+                        <div key={dep.depositId} className="w-full mt-4 p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl animate-fade-in text-left">
+                          <div className="flex items-center justify-between">
+                            <span className="text-amber-400 font-bold text-sm flex items-center gap-2">
+                              <span className="inline-block animate-spin text-base">⏳</span> En Mempool (Sin confirmar)
+                            </span>
+                            <span className="text-xs font-mono bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full border border-amber-500/30">
+                              {dep.confirmations || 0}/1 Conf
+                            </span>
+                          </div>
+                          <div className="mt-2 text-xs text-gray-300 flex justify-between items-center">
+                            <span>Monto: <strong className="text-white">{dep.btcBought || dep.marketBuy?.btcBought || 0} BTC</strong></span>
+                            {dep.amount && <span>~${Number(dep.amount).toLocaleString('de-DE')} COP</span>}
+                          </div>
+                          <div className="mt-2 flex items-center justify-between text-[11px] text-gray-500 font-mono">
+                            <span className="truncate max-w-[200px]">Tx: {dep.txid || dep.depositId}</span>
+                            <a
+                              href={`https://mempool.space/tx/${dep.txid || dep.depositId}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-amber-400/80 hover:text-amber-300 hover:underline ml-2 whitespace-nowrap"
+                            >
+                              Ver en Mempool ↗
+                            </a>
+                          </div>
+                        </div>
+                      ))}
 
                       <p className="text-xs text-yellow-400/90 mt-4 leading-relaxed bg-yellow-400/5 p-3 rounded-lg border border-yellow-400/10">
                         ⚠️ <strong>Nota:</strong> Los depósitos requieren exactamente <strong>1 confirmación</strong> de la red Bitcoin (~10 minutos) para acreditarse en tu balance.
@@ -2945,12 +3208,112 @@ export default function Home() {
                 &times;
               </button>
             </div>
-            <div className="overflow-y-auto pr-2 space-y-4 flex-1">
+            <div className="overflow-y-auto pr-2 space-y-5 flex-1">
+              {/* In-App Notifications Section */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <span>🔔</span> Mensajes y Alertas
+                  </h3>
+                  {appNotifications.length > 0 && (
+                    <span className="text-xs font-mono text-gray-400 bg-white/5 px-2 py-0.5 rounded-full border border-white/10">
+                      {appNotifications.length}
+                    </span>
+                  )}
+                </div>
+
+                {appNotifications.length > 0 ? (
+                  <div className="space-y-2.5">
+                    {appNotifications.map((notif) => {
+                      const isUnread = !notif.read;
+                      let icon = '🔔';
+                      let cardStyle = 'border-white/10 bg-white/5';
+                      let titleColor = 'text-white';
+
+                      if (notif.type === 'onchain_detected') {
+                        icon = '⏳';
+                        cardStyle = 'border-amber-500/30 bg-amber-500/10';
+                        titleColor = 'text-amber-400';
+                      } else if (notif.type === 'onchain_deposit' || notif.type === 'cop_deposit') {
+                        icon = '✅';
+                        cardStyle = 'border-emerald-500/30 bg-emerald-500/10';
+                        titleColor = 'text-emerald-400';
+                      } else if (notif.type === 'onchain_withdrawal' || notif.type === 'lightning_withdrawal') {
+                        icon = '📤';
+                        cardStyle = 'border-orange-500/30 bg-orange-500/10';
+                        titleColor = 'text-orange-400';
+                      } else if (notif.type === 'intent_created') {
+                        icon = '📋';
+                        cardStyle = 'border-emerald-500/20 bg-emerald-950/20';
+                        titleColor = 'text-emerald-300';
+                      } else if (notif.type === 'cop_deposit_small') {
+                        icon = 'ℹ️';
+                        cardStyle = 'border-blue-500/20 bg-blue-500/10';
+                        titleColor = 'text-blue-300';
+                      }
+
+                      return (
+                        <div
+                          key={notif.id}
+                          className={`p-3.5 rounded-xl border text-left transition-all ${cardStyle} ${
+                            isUnread ? 'ring-1 ring-emerald-400/40' : ''
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-base">{icon}</span>
+                              <span className={`font-semibold text-sm ${titleColor}`}>{notif.title}</span>
+                            </div>
+                            <span className="text-[11px] text-gray-400 shrink-0">
+                              {new Date(notif.timestamp || 0).toLocaleString([], {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
+                            </span>
+                          </div>
+
+                          <p className="text-xs text-gray-300 mt-1.5 leading-relaxed">{notif.message}</p>
+
+                          {(notif.reference || notif.txid) && (
+                            <div className="mt-2.5 flex items-center justify-between text-[11px] text-gray-400 pt-2 border-t border-white/5">
+                              {notif.reference && (
+                                <span className="font-mono bg-white/10 px-2 py-0.5 rounded text-gray-300">
+                                  Ref: {notif.reference}
+                                </span>
+                              )}
+                              {notif.txid && (
+                                <div className="flex items-center gap-1.5 font-mono ml-auto">
+                                  <span className="truncate max-w-[150px]">Tx: {notif.txid}</span>
+                                  <a
+                                    href={`https://mempool.space/tx/${notif.txid}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-amber-400 hover:text-amber-300 hover:underline"
+                                  >
+                                    Mempool ↗
+                                  </a>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-500 py-3 text-center bg-white/5 rounded-xl border border-white/5">
+                    No tienes mensajes nuevos.
+                  </p>
+                )}
+              </div>
+
               {isAdminUser(user?.uid) && (
-                <>
-                  <h3 className="text-lg font-bold text-white mt-2 mb-2">Notificaciones del Sistema</h3>
+                <div>
+                  <h3 className="text-base font-bold text-white mt-2 mb-2">Notificaciones del Sistema (Admin)</h3>
                   {allAdminDeposits.length > 0 ? allAdminDeposits.map((dep, idx) => (
-                    <div key={`admin-${idx}`} className="bg-white/5 p-4 rounded-xl border border-white/10">
+                    <div key={`admin-${idx}`} className="bg-white/5 p-4 rounded-xl border border-white/10 mb-2.5 text-left">
                       <p className="text-sm text-gray-400 mb-1">{new Date(dep.timestamp || 0).toLocaleString()}</p>
                       <p className="text-white font-medium">Deposito de {dep.parsedName}</p>
                       <p className="text-green-400 font-bold">${Number(String(dep.amount).replace(/,/g, '')).toLocaleString('de-DE')} <span className="text-xs text-gray-500">[{dep.status}]</span></p>
@@ -2963,16 +3326,18 @@ export default function Home() {
                       )}
                     </div>
                   )) : <p className="text-gray-400 text-center py-4">No hay notificaciones del sistema.</p>}
-                  <h3 className="text-lg font-bold text-white mt-6 mb-2">Mis Movimientos</h3>
-                </>
+                </div>
               )}
+
+              <div>
+                <h3 className="text-base font-bold text-white mb-3 text-left">Historial de Movimientos</h3>
 
               {[...allUserDeposits, ...allUserWithdrawals]
                 .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
                 .map((item, idx) => (
                   <div key={`user-${idx}`} className="bg-white/5 p-4 rounded-xl border border-white/10">
                     <p className="text-sm text-gray-400 mb-1">{new Date(item.timestamp || 0).toLocaleString()}</p>
-                    {'parsedName' in item ? (
+                    {'depositId' in item ? (
                       <>
                         <p className="text-white font-medium">Deposito Recibido</p>
                         <p className="text-green-400 font-bold">${item.saldoCop ? item.saldoCop.toLocaleString('de-DE') : Number(String(item.amount).replace(/,/g, '')).toLocaleString('de-DE')} <span className="text-xs text-gray-500">[{item.status}]</span></p>
@@ -3004,6 +3369,7 @@ export default function Home() {
               {[...allUserDeposits, ...allUserWithdrawals].length === 0 && (
                 <p className="text-gray-400 text-center py-4">No hay movimientos personales.</p>
               )}
+              </div>
             </div>
           </div>
         </div>

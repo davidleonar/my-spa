@@ -207,7 +207,7 @@ export async function GET(req: NextRequest) {
   if (lndPath.startsWith('/v1/invoice/')) {
     const hash = lndPath.split('/v1/invoice/')[1];
 
-    if (!/^[A-Za-z0-9+/=]{43,44}$/.test(hash)) { // Base64 regex
+    if (!/^([A-Za-z0-9+/=]{43,44}|[a-fA-F0-9]{64})$/.test(hash)) { // Base64 or 64-char Hex regex
     return new NextResponse(JSON.stringify({ error: 'Invalid hash format' }), { status: 400 });
     }
   }
