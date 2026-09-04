@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import '../../app/globals.css';
-import { ArrowLeftIcon, ArrowPathIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
+import { ArrowLeftIcon, ArrowPathIcon, MagnifyingGlassIcon, Bars3Icon, UserPlusIcon, XMarkIcon, CheckCircleIcon } from '@heroicons/react/24/outline';
 import { auth, database } from '../../app/lib/firebase';
 import { isAdminUser } from '../../app/lib/auth-utils';
 import { ref, onValue, remove } from "firebase/database";
@@ -100,6 +100,126 @@ export default function AdminDashboard() {
   const [submittingManualWithdrawal, setSubmittingManualWithdrawal] = useState<boolean>(false);
   const [manualWithdrawalError, setManualWithdrawalError] = useState<string | null>(null);
   const [manualWithdrawalSuccess, setManualWithdrawalSuccess] = useState<string | null>(null);
+
+  // Admin Drawer & Submenu States
+  const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
+  const [showCreateProfileModal, setShowCreateProfileModal] = useState<boolean>(false);
+
+  // New Profile Form States
+  const [newProfileId, setNewProfileId] = useState<string>("");
+  const [newProfileName, setNewProfileName] = useState<string>("");
+  const [newProfileEmail, setNewProfileEmail] = useState<string>("");
+  const [newProfilePhone, setNewProfilePhone] = useState<string>("");
+  const [newProfileBankName, setNewProfileBankName] = useState<string>("");
+  const [newProfileBankData, setNewProfileBankData] = useState<string>("");
+  const [newProfileNotes, setNewProfileNotes] = useState<string>("");
+  const [submittingCreateProfile, setSubmittingCreateProfile] = useState<boolean>(false);
+  const [createProfileError, setCreateProfileError] = useState<string | null>(null);
+  const [createProfileSuccess, setCreateProfileSuccess] = useState<string | null>(null);
+
+  const resetCreateProfileForm = () => {
+    setNewProfileId("");
+    setNewProfileName("");
+    setNewProfileEmail("");
+    setNewProfilePhone("");
+    setNewProfileBankName("");
+    setNewProfileBankData("");
+    setNewProfileNotes("");
+    setCreateProfileError(null);
+    setCreateProfileSuccess(null);
+  };
+
+  const handleCreateProfileSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreateProfileError(null);
+    setCreateProfileSuccess(null);
+
+    const nationalId = newProfileId.trim();
+    const fullName = newProfileName.trim();
+
+    if (!nationalId) {
+      setCreateProfileError("El documento de identidad (Cédula) es obligatorio.");
+      return;
+    }
+    if (!fullName) {
+      setCreateProfileError("El nombre completo es obligatorio.");
+      return;
+    }
+
+    // Client-side quick check against already loaded users
+    const existing = users.find(u => 
+      String(u.id || '').toLowerCase() === nationalId.toLowerCase() ||
+      String(u.uid || '').toLowerCase() === nationalId.toLowerCase()
+    );
+    if (existing) {
+      setCreateProfileError(`Ya existe un perfil con el documento "${nationalId}" (${existing.name}).`);
+      return;
+    }
+
+    setSubmittingCreateProfile(true);
+
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) {
+        throw new Error("Admin authentication required.");
+      }
+
+      const response = await fetch(
+        "https://us-central1-rendimientos-5dbb9.cloudfunctions.net/createManualProfile",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${idToken}`
+          },
+          body: JSON.stringify({
+            id: nationalId,
+            name: fullName,
+            email: newProfileEmail.trim(),
+            phone: newProfilePhone.trim(),
+            bankName: newProfileBankName.trim(),
+            bankData: newProfileBankData.trim(),
+            notes: newProfileNotes.trim()
+          })
+        }
+      );
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `Error ${response.status}: Failed to create profile`);
+      }
+
+      const result = await response.json();
+      console.log("Profile created:", result);
+
+      const createdUser: UserBalance = {
+        id: nationalId,
+        uid: nationalId,
+        name: fullName,
+        BTCbalance: 0,
+        avgBuyPrice: 0,
+        avgBuyPriceUsdt: 0,
+        totalCopInvested: 0,
+        totalUsdtInvested: 0
+      };
+
+      setCreateProfileSuccess(`¡Perfil de ${fullName} (Cédula: ${nationalId}) creado con éxito!`);
+      // Automatically select this user so admin can immediately view and operate
+      setSelectedUser(createdUser);
+
+      // Close modal after short delay
+      setTimeout(() => {
+        setShowCreateProfileModal(false);
+        resetCreateProfileForm();
+      }, 2500);
+
+    } catch (err: unknown) {
+      console.error("Create profile error:", err);
+      setCreateProfileError(err instanceof Error ? err.message : "Error inesperado al crear el perfil.");
+    } finally {
+      setSubmittingCreateProfile(false);
+    }
+  };
 
 
   // Guard: Check admin authorization
@@ -712,9 +832,277 @@ export default function AdminDashboard() {
 
   return (
     <div className="bg-[#0B0E11] text-white min-h-screen font-sans">
+      {/* Slide-over Submenu Drawer Overlay */}
+      {isDrawerOpen && (
+        <div 
+          onClick={() => setIsDrawerOpen(false)}
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm transition-opacity duration-300"
+        />
+      )}
+
+      {/* Slide-over Submenu Drawer */}
+      <div className={`fixed top-0 left-0 bottom-0 w-80 max-w-[85vw] bg-[#0E1318] border-r border-white/10 z-50 shadow-2xl transition-transform duration-300 ease-in-out flex flex-col ${
+        isDrawerOpen ? 'translate-x-0' : '-translate-x-full'
+      }`}>
+        {/* Drawer Header */}
+        <div className="p-5 border-b border-white/10 flex justify-between items-center bg-[#141A20]/60">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-primary/10 rounded-xl border border-primary/20">
+              <span className="text-primary font-bold text-base">⚡</span>
+            </div>
+            <div>
+              <h3 className="font-bold text-white text-base leading-tight">Admin Menu</h3>
+              <p className="text-[11px] text-gray-400 font-mono">Consola Rendimientos</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setIsDrawerOpen(false)}
+            className="p-1.5 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-all"
+            aria-label="Cerrar menú"
+          >
+            <XMarkIcon className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Drawer Content / Submenu Options */}
+        <div className="p-4 flex flex-col gap-2 flex-1 overflow-y-auto">
+          <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider px-3 mb-1">
+            Gestión de Usuarios
+          </span>
+
+          <button
+            onClick={() => {
+              setIsDrawerOpen(false);
+              resetCreateProfileForm();
+              setShowCreateProfileModal(true);
+            }}
+            className="flex items-center gap-3.5 px-3.5 py-3 rounded-xl bg-white/[0.03] hover:bg-primary/10 border border-white/5 hover:border-primary/30 transition-all text-left group"
+          >
+            <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-400 border border-emerald-500/20 group-hover:scale-105 transition-transform">
+              <UserPlusIcon className="w-5 h-5" />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-sm font-semibold text-white group-hover:text-primary transition-colors">
+                Crear Nuevo Perfil
+              </span>
+              <span className="text-xs text-gray-400">
+                Registrar usuario por documento (Cédula)
+              </span>
+            </div>
+          </button>
+        </div>
+
+        {/* Drawer Footer */}
+        <div className="p-4 border-t border-white/10 bg-[#141A20]/40 text-xs text-gray-500 flex justify-between items-center">
+          <span>Rendimientos.net</span>
+          <span className="font-mono">v1.2</span>
+        </div>
+      </div>
+
+      {/* Create Profile Modal */}
+      {showCreateProfileModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md overflow-y-auto">
+          <div className="bg-[#141A20] border border-white/10 rounded-2xl w-full max-w-xl p-6 sm:p-8 shadow-2xl relative animate-in fade-in zoom-in duration-200 my-8">
+            {/* Modal Header */}
+            <div className="flex justify-between items-start mb-6">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-primary/10 border border-primary/20 rounded-xl text-primary">
+                  <UserPlusIcon className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg sm:text-xl font-bold text-white tracking-tight">Crear Nuevo Perfil</h3>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    Registrar usuario manual sin cuenta de Google.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  if (!submittingCreateProfile) {
+                    setShowCreateProfileModal(false);
+                    resetCreateProfileForm();
+                  }
+                }}
+                disabled={submittingCreateProfile}
+                className="p-1.5 hover:bg-white/10 rounded-lg text-gray-400 hover:text-white transition-all"
+              >
+                <XMarkIcon className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleCreateProfileSubmit} className="flex flex-col gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* National ID / Cédula (Mandatory) */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-semibold text-gray-300 flex items-center gap-1">
+                    Cédula / Documento <span className="text-primary font-bold">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newProfileId}
+                    onChange={(e) => setNewProfileId(e.target.value)}
+                    placeholder="Ej. 1017123456"
+                    className="bg-[#0B0E11] border border-white/10 focus:border-primary rounded-xl px-3.5 py-2.5 text-white font-mono text-sm placeholder-gray-500 focus:outline-none transition-colors"
+                  />
+                  <span className="text-[11px] text-gray-400">Identificador único del usuario</span>
+                </div>
+
+                {/* Full Name (Mandatory) */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-semibold text-gray-300 flex items-center gap-1">
+                    Nombre Completo <span className="text-primary font-bold">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newProfileName}
+                    onChange={(e) => setNewProfileName(e.target.value)}
+                    placeholder="Ej. Carlos Arturo Pérez"
+                    className="bg-[#0B0E11] border border-white/10 focus:border-primary rounded-xl px-3.5 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none transition-colors"
+                  />
+                  <span className="text-[11px] text-gray-400">Primeros 2 nombres para matching bancario</span>
+                </div>
+
+                {/* Email (Optional) */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-semibold text-gray-300 flex items-center gap-1">
+                    Correo Electrónico <span className="text-[10px] text-gray-400 font-normal">(Opcional)</span>
+                  </label>
+                  <input
+                    type="email"
+                    value={newProfileEmail}
+                    onChange={(e) => setNewProfileEmail(e.target.value)}
+                    placeholder="usuario@ejemplo.com"
+                    className="bg-[#0B0E11] border border-white/10 focus:border-primary rounded-xl px-3.5 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none transition-colors"
+                  />
+                  <span className="text-[11px] text-gray-400">Para recibos y notificaciones de depósito</span>
+                </div>
+
+                {/* Phone (Optional) */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-semibold text-gray-300 flex items-center gap-1">
+                    Teléfono / WhatsApp <span className="text-[10px] text-gray-400 font-normal">(Opcional)</span>
+                  </label>
+                  <input
+                    type="tel"
+                    value={newProfilePhone}
+                    onChange={(e) => setNewProfilePhone(e.target.value)}
+                    placeholder="+57 300 123 4567"
+                    className="bg-[#0B0E11] border border-white/10 focus:border-primary rounded-xl px-3.5 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none transition-colors"
+                  />
+                  <span className="text-[11px] text-gray-400">Contacto del titular</span>
+                </div>
+
+                {/* Bank Name (Optional) */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-semibold text-gray-300 flex items-center gap-1">
+                    Banco de Retiro <span className="text-[10px] text-gray-400 font-normal">(Opcional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={newProfileBankName}
+                    onChange={(e) => setNewProfileBankName(e.target.value)}
+                    placeholder="Bancolombia, Nequi, etc."
+                    className="bg-[#0B0E11] border border-white/10 focus:border-primary rounded-xl px-3.5 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none transition-colors"
+                  />
+                </div>
+
+                {/* Bank Account Number (Optional) */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-semibold text-gray-300 flex items-center gap-1">
+                    Cuenta Bancaria <span className="text-[10px] text-gray-400 font-normal">(Opcional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={newProfileBankData}
+                    onChange={(e) => setNewProfileBankData(e.target.value)}
+                    placeholder="Ahorros 123-456789-00"
+                    className="bg-[#0B0E11] border border-white/10 focus:border-primary rounded-xl px-3.5 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none transition-colors"
+                  />
+                </div>
+              </div>
+
+              {/* Notes (Optional) */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-gray-300 flex items-center gap-1">
+                  Notas / Observaciones <span className="text-[10px] text-gray-400 font-normal">(Opcional)</span>
+                </label>
+                <textarea
+                  rows={2}
+                  value={newProfileNotes}
+                  onChange={(e) => setNewProfileNotes(e.target.value)}
+                  placeholder="Detalles adicionales sobre el perfil..."
+                  className="bg-[#0B0E11] border border-white/10 focus:border-primary rounded-xl px-3.5 py-2.5 text-white text-sm placeholder-gray-500 focus:outline-none transition-colors resize-none"
+                />
+              </div>
+
+              {/* Error Banner */}
+              {createProfileError && (
+                <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs px-3.5 py-2.5 rounded-xl font-mono flex items-center gap-2">
+                  <span>⚠️</span>
+                  <span>{createProfileError}</span>
+                </div>
+              )}
+
+              {/* Success Banner */}
+              {createProfileSuccess && (
+                <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs px-3.5 py-2.5 rounded-xl flex items-center gap-2">
+                  <CheckCircleIcon className="w-5 h-5 flex-shrink-0" />
+                  <span>{createProfileSuccess}</span>
+                </div>
+              )}
+
+              {/* Form Buttons */}
+              <div className="flex justify-end gap-3 mt-2">
+                <button
+                  type="button"
+                  disabled={submittingCreateProfile}
+                  onClick={() => {
+                    setShowCreateProfileModal(false);
+                    resetCreateProfileForm();
+                  }}
+                  className="px-5 py-2.5 rounded-xl text-sm font-semibold text-gray-400 hover:text-white hover:bg-white/5 border border-transparent transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingCreateProfile}
+                  className="px-6 py-2.5 rounded-xl text-sm font-bold text-black bg-primary hover:bg-primary-hover disabled:bg-primary/50 transition-all flex items-center gap-2 shadow-lg shadow-primary/20 active:scale-95"
+                >
+                  {submittingCreateProfile ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-t-transparent border-black rounded-full animate-spin"></div>
+                      <span>Creando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <UserPlusIcon className="w-4 h-4" />
+                      <span>Crear Perfil</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Top Header */}
-      <header className="sticky top-0 z-50 bg-[#0B0E11]/80 backdrop-blur-lg border-b border-white/5 py-4 px-6 md:px-12 flex justify-between items-center">
+      <header className="sticky top-0 z-40 bg-[#0B0E11]/80 backdrop-blur-lg border-b border-white/5 py-4 px-6 md:px-12 flex justify-between items-center">
         <div className="flex items-center gap-3">
+          {/* 3-Bar Hamburger Menu Button */}
+          <button
+            onClick={() => setIsDrawerOpen(true)}
+            aria-label="Abrir menú de administración"
+            title="Menú de administración"
+            className="p-2 hover:bg-white/10 active:scale-95 rounded-xl transition-all group border border-white/5 hover:border-primary/30"
+          >
+            <Bars3Icon className="w-6 h-6 text-gray-300 group-hover:text-primary transition-colors" />
+          </button>
+
           <button
             onClick={() => router.push('/')}
             className="p-2 hover:bg-white/5 rounded-full transition-colors group"
@@ -912,7 +1300,7 @@ export default function AdminDashboard() {
                   <div>
                     <h3 className="text-xl font-bold text-white tracking-tight">{selectedUser.name}</h3>
                     <div className="text-xs text-gray-400 font-mono mt-1 flex flex-col gap-0.5">
-                      <span>Google UID: <span className="text-gray-300">{selectedUser.uid}</span></span>
+                      <span>Google UID: <span className="text-gray-300">{selectedUser.uid === selectedUser.id ? "Ninguno (Perfil Manual)" : selectedUser.uid}</span></span>
                       <span>National ID: <span className="text-gray-300">{selectedUser.id}</span></span>
                     </div>
                   </div>

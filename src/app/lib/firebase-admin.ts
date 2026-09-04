@@ -1,7 +1,15 @@
 import { getApps, getApp, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 
-const app = getApps().length === 0 ? initializeApp() : getApp();
+let app;
+if (getApps().length === 0) {
+  try {
+    app = initializeApp();
+  } catch {
+    // Graceful fallback during build-time page collection when GCP credentials are missing
+  }
+} else {
+  app = getApp();
+}
 
-export const adminAuth = getAuth(app);
-// export const adminDb = getFirestore(app); // if you need it later
+export const adminAuth = app ? getAuth(app) : ({} as ReturnType<typeof getAuth>);

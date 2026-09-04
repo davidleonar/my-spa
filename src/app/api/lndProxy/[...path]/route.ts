@@ -5,6 +5,8 @@ import { adminAuth } from '@/app/lib/firebase-admin'; // our initialized admin a
 import { getAdminUidsServer } from '@/app/lib/auth-utils';
 import { jsonWithCors, handleCorsPreflight } from '@/app/lib/cors';
 
+export const dynamic = 'force-dynamic';
+
 
 const ipLimiter = new RateLimiterMemory({ points: 30, duration: 60 }); // 30/min per IP
 const userLimiter = new RateLimiterMemory({ points: 10, duration: 60 }); // 10/min per UID
@@ -205,7 +207,7 @@ export async function GET(req: NextRequest) {
   if (lndPath.startsWith('/v1/invoice/')) {
     const hash = lndPath.split('/v1/invoice/')[1];
 
-    if (!/^[A-Za-z0-9+/=]{43,44}$/.test(hash)) { // Base64 regex
+    if (!/^([A-Za-z0-9+/=]{43,44}|[a-fA-F0-9]{64})$/.test(hash)) { // Base64 or 64-char Hex regex
     return new NextResponse(JSON.stringify({ error: 'Invalid hash format' }), { status: 400 });
     }
   }

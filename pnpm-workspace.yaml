@@ -8,7 +8,6 @@ allowBuilds:
   utf-8-validate: false
 minimumReleaseAgeExclude:
   - protobufjs@7.2.5
-  - elliptic@6.6.2
   - postcss@8.5.10
   - protobufjs@7.5.5
   - fast-xml-parser@5.7.0
