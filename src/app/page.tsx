@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback, useRef } from "react";
 import '../app/globals.css';
-import { ArrowsUpDownIcon, BellIcon, DocumentDuplicateIcon } from '@heroicons/react/24/outline';
+import { ArrowsUpDownIcon, BellIcon, DocumentDuplicateIcon, CheckCircleIcon } from '@heroicons/react/24/outline';
 import { QRCodeCanvas } from 'qrcode.react';
 import { auth, database } from '../app/lib/firebase'; // Adjust path
 import { isAdminUser } from '../app/lib/auth-utils';
@@ -90,6 +90,7 @@ interface BankDeposit {
   adminNotified?: boolean;
   type?: string;
   address?: string;
+  reference?: string;
   btcBought?: number;
   confirmations?: number;
   txid?: string;
@@ -112,6 +113,20 @@ interface DepositIntent {
   breBKey?: string;
   createdAt: number;
   expiresAt: number;
+  settledAt?: number;
+  depositId?: string;
+}
+
+interface ConfirmedCopDeposit {
+  id: string;
+  amountCop: number;
+  reference?: string;
+  senderName?: string;
+  btcBought?: number;
+  rate?: number;
+  timestamp: number;
+  isSmall?: boolean;
+  depositId?: string;
 }
 
 interface AppNotification {
@@ -221,6 +236,33 @@ export default function Home() {
   const [creatingIntent, setCreatingIntent] = useState<boolean>(false);
   const [intentError, setIntentError] = useState<string | null>(null);
   const [cancellingIntent, setCancellingIntent] = useState<boolean>(false);
+  const [confirmedCopDeposit, setConfirmedCopDeposit] = useState<ConfirmedCopDeposit | null>(null);
+  const [showCopConfirmedBanner, setShowCopConfirmedBanner] = useState<boolean>(false);
+  const dismissedConfirmationsRef = useRef<Set<string>>(new Set());
+  const activeIntentIdRef = useRef<string | null>(null);
+
+  const isConfirmationDismissed = useCallback((id: string) => {
+    if (dismissedConfirmationsRef.current.has(id)) return true;
+    if (typeof window !== 'undefined') {
+      try {
+        return sessionStorage.getItem(`dismissed_cop_${id}`) === 'true';
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }, []);
+
+  const markConfirmationDismissed = useCallback((id: string) => {
+    dismissedConfirmationsRef.current.add(id);
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.setItem(`dismissed_cop_${id}`, 'true');
+      } catch {
+        // ignore
+      }
+    }
+  }, []);
   const [showCopRetiros, setShowCopRetiros] = useState<boolean>(false);
   const [showBtcLightningWithdrawal, setShowBtcLightningWithdrawal] = useState<boolean>(false);
   const [copRetirosAmount, setCopRetirosAmount] = useState<string>('');
@@ -460,9 +502,12 @@ export default function Home() {
     const unsubscribeD = onValue(userDepositsRef, (snapshot) => {
       const depositNotifs: BankDeposit[] = [];
       const allD: BankDeposit[] = [];
+      const now = Date.now();
+
       snapshot.forEach((reqSnap) => {
         const data = reqSnap.val();
-        const dep = {
+        if (!data) return;
+        const dep: BankDeposit = {
           uid: user.uid,
           depositId: reqSnap.key!,
           ...data,
@@ -473,7 +518,48 @@ export default function Home() {
         }
       });
       setUserUnreadDeposits(depositNotifs);
-      setAllUserDeposits(allD.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)));
+      const sortedDeposits = allD.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      setAllUserDeposits(sortedDeposits);
+
+      const recentSettledDep: BankDeposit | undefined = sortedDeposits.find(
+        (dep) =>
+          dep.status === 'settled' &&
+          !isConfirmationDismissed(dep.depositId) &&
+          dep.timestamp &&
+          now - dep.timestamp < 30 * 60 * 1000
+      );
+
+      if (recentSettledDep) {
+        const dep: BankDeposit = recentSettledDep;
+        setConfirmedCopDeposit((prev) => {
+          if (prev) {
+            if (prev.depositId === dep.depositId || (dep.reference && prev.reference === dep.reference)) {
+              return {
+                ...prev,
+                btcBought: dep.marketBuy?.btcBought ?? prev.btcBought,
+                rate: dep.marketBuy?.btcUsdtPrice ?? prev.rate,
+                isSmall: dep.marketBuy ? false : prev.isSmall,
+              };
+            }
+            return prev;
+          }
+          if (!dep.userNotified) {
+            setShowCopConfirmedBanner(true);
+            return {
+              id: dep.depositId,
+              depositId: dep.depositId,
+              amountCop: typeof dep.amount === 'number' ? dep.amount : parseInt(String(dep.amount || '0').replace(/\D/g, ''), 10),
+              reference: dep.reference,
+              senderName: dep.parsedName,
+              btcBought: dep.marketBuy?.btcBought,
+              rate: dep.marketBuy?.btcUsdtPrice,
+              timestamp: dep.timestamp || Date.now(),
+              isSmall: !dep.marketBuy,
+            };
+          }
+          return null;
+        });
+      }
     });
     unsubscribes.push(unsubscribeD);
 
@@ -504,17 +590,47 @@ export default function Home() {
 
     const userIntentsRef = ref(database, `depositIntents/${user.uid}`);
     const unsubscribeIntents = onValue(userIntentsRef, (snapshot) => {
-      let active: DepositIntent | null = null;
+      const intents: (DepositIntent & { depositId?: string })[] = [];
       const now = Date.now();
       if (snapshot.exists()) {
         snapshot.forEach((snap) => {
           const data = snap.val();
-          if (data && data.status === 'pending' && (!data.expiresAt || data.expiresAt > now)) {
-            active = { id: snap.key!, ...data };
+          if (data) {
+            intents.push({ id: snap.key!, ...data });
           }
         });
       }
+
+      const active = intents.find((intent) => intent.status === 'pending' && (!intent.expiresAt || intent.expiresAt > now)) || null;
+      const matchedSettledIntent = intents.find((intent) => {
+        if (intent.status !== 'settled') return false;
+        const isTracked = activeIntentIdRef.current === intent.id;
+        const isRecent = intent.settledAt && now - intent.settledAt < 30 * 60 * 1000;
+        return (isTracked || isRecent) && !isConfirmationDismissed(intent.id);
+      }) || null;
+
       setActiveDepositIntent(active);
+      if (active) {
+        activeIntentIdRef.current = active.id;
+      }
+
+      if (matchedSettledIntent) {
+        const intentToConfirm = matchedSettledIntent;
+        setConfirmedCopDeposit((prev) => {
+          return {
+            id: intentToConfirm.id,
+            amountCop: intentToConfirm.amount,
+            reference: intentToConfirm.reference,
+            senderName: intentToConfirm.senderName,
+            timestamp: intentToConfirm.settledAt || Date.now(),
+            depositId: intentToConfirm.depositId,
+            btcBought: prev?.id === intentToConfirm.id ? prev.btcBought : undefined
+          };
+        });
+        setShowCopConfirmedBanner(true);
+        setShowCopDepositos(true);
+        activeIntentIdRef.current = null;
+      }
     }, (error) => console.error('depositIntents onValue error:', error));
     unsubscribes.push(unsubscribeIntents);
 
@@ -522,11 +638,14 @@ export default function Home() {
     const unsubscribeNotifs = onValue(userNotifsRef, (snapshot) => {
       const notifs: AppNotification[] = [];
       let unread = 0;
+      const now = Date.now();
+
       if (snapshot.exists()) {
         snapshot.forEach((snap) => {
           const data = snap.val();
           if (data) {
-            notifs.push({ id: snap.key!, ...data });
+            const notifItem = { id: snap.key!, ...data };
+            notifs.push(notifItem);
             if (!data.read) {
               unread++;
             }
@@ -535,13 +654,44 @@ export default function Home() {
       }
       setAppNotifications(notifs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)));
       setUnreadNotifCount(unread);
+
+      const recentCopNotif = notifs.find(
+        (n) =>
+          !n.read &&
+          (n.type === 'cop_deposit' || n.type === 'cop_deposit_small') &&
+          !isConfirmationDismissed(n.id) &&
+          n.timestamp &&
+          now - n.timestamp < 30 * 60 * 1000
+      );
+
+      if (recentCopNotif) {
+        const notif = recentCopNotif;
+        setConfirmedCopDeposit((prev) => {
+          if (prev) {
+            return {
+              ...prev,
+              btcBought: notif.amountBtc ?? prev.btcBought,
+              isSmall: notif.type === 'cop_deposit_small',
+            };
+          }
+          setShowCopConfirmedBanner(true);
+          return {
+            id: notif.id,
+            amountCop: notif.amountCop || 0,
+            btcBought: notif.amountBtc,
+            reference: notif.reference,
+            timestamp: notif.timestamp || Date.now(),
+            isSmall: notif.type === 'cop_deposit_small',
+          };
+        });
+      }
     }, (error) => console.error('notifications onValue error:', error));
     unsubscribes.push(unsubscribeNotifs);
 
     return () => {
       unsubscribes.forEach((unsub) => unsub());
     };
-  }, [user]);
+  }, [user, isConfirmationDismissed]);
 
   const handleAdminBellClick = async () => {
     setShowNotificationsModal(true);
@@ -830,6 +980,9 @@ export default function Home() {
       }
 
       setActiveDepositIntent(data.intent);
+      activeIntentIdRef.current = data.intent.id;
+      setConfirmedCopDeposit(null);
+      setShowCopConfirmedBanner(false);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error de conexión.';
       setIntentError(msg);
@@ -859,7 +1012,13 @@ export default function Home() {
         throw new Error(data.error || 'Error al cancelar la intención.');
       }
 
+      if (activeIntentIdRef.current) {
+        markConfirmationDismissed(activeIntentIdRef.current);
+      }
+      activeIntentIdRef.current = null;
       setActiveDepositIntent(null);
+      setConfirmedCopDeposit(null);
+      setShowCopConfirmedBanner(false);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error al cancelar.';
       setIntentError(msg);
@@ -1740,6 +1899,58 @@ export default function Home() {
         RENDIMIENTOS
       </h1>
 
+      {/* Floating Confirmation Banner for COP Deposit */}
+      {showCopConfirmedBanner && confirmedCopDeposit && (
+        <div className="fixed top-6 right-4 sm:right-8 z-50 max-w-md w-[calc(100%-2rem)] bg-gray-950/95 border-2 border-emerald-500 text-white p-4 rounded-2xl shadow-[0_10px_40px_rgba(16,185,129,0.35)] backdrop-blur-md animate-fade-in">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="text-3xl p-2 bg-emerald-500/20 rounded-xl border border-emerald-500/40 shrink-0">
+                🎉
+              </div>
+              <div>
+                <h5 className="font-bold text-base text-emerald-400 flex items-center gap-1.5">
+                  ¡Depósito COP Confirmado!
+                </h5>
+                <p className="text-xs text-gray-300 mt-0.5">
+                  Recibimos ${confirmedCopDeposit.amountCop.toLocaleString('de-DE')} COP
+                  {confirmedCopDeposit.btcBought ? (
+                    <span className="font-bold text-amber-400 ml-1">
+                      (+{confirmedCopDeposit.btcBought} BTC)
+                    </span>
+                  ) : ''}.
+                </p>
+                <div className="mt-2.5 flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setShowCopDepositos(true);
+                      setShowCopConfirmedBanner(false);
+                      const el = document.getElementById('cop-deposits-section');
+                      if (el) el.scrollIntoView({ behavior: 'smooth' });
+                    }}
+                    className="text-xs bg-emerald-500/30 hover:bg-emerald-500/50 text-emerald-200 px-3 py-1.5 rounded-lg border border-emerald-500/40 font-semibold transition-all"
+                  >
+                    Ver confirmación
+                  </button>
+                  <button
+                    onClick={() => setShowCopConfirmedBanner(false)}
+                    className="text-xs text-gray-400 hover:text-white px-2 py-1.5 transition-all"
+                  >
+                    Descartar
+                  </button>
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowCopConfirmedBanner(false)}
+              className="text-gray-400 hover:text-white p-1 text-lg font-bold"
+              aria-label="Cerrar notificación"
+            >
+              &times;
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="bg-surface border border-surface-border backdrop-blur-xl p-8 rounded-3xl shadow-neon w-full max-w-xl transition-all z-10">
 
         {loadingAuth ? (
@@ -1923,7 +2134,7 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="mb-6 w-full">
+            <div id="cop-deposits-section" className="mb-6 w-full">
               <button
                 onClick={() => setShowCopDepositos(!showCopDepositos)}
                 className="w-full px-4 py-4 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 rounded-2xl text-white font-bold text-lg shadow-[0_4px_20px_rgba(16,185,129,0.4)] transition-all active:scale-[0.98] flex items-center justify-center gap-2 border border-emerald-400/30"
@@ -1938,7 +2149,106 @@ export default function Home() {
                     <span className="text-emerald-400">🇨🇴 Depósitos en COP (Bre-B / Bancolombia)</span>
                   </h3>
 
-                  {activeDepositIntent ? (
+                  {confirmedCopDeposit ? (
+                    <div className="bg-gradient-to-b from-emerald-950/70 via-gray-900/90 to-black/80 border-2 border-emerald-500/70 p-6 rounded-2xl animate-fade-in mb-6 text-center shadow-[0_0_35px_rgba(16,185,129,0.3)]">
+                      <div className="w-16 h-16 mx-auto mb-3 bg-emerald-500/20 border border-emerald-500/40 rounded-full flex items-center justify-center text-3xl shadow-[0_0_20px_rgba(16,185,129,0.4)]">
+                        🎉
+                      </div>
+
+                      <span className="inline-block px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-xs font-semibold uppercase tracking-wider mb-2">
+                        Depósito Confirmado
+                      </span>
+
+                      <h4 className="text-2xl font-bold text-white mb-1">
+                        ¡Transferencia Recibida con Éxito!
+                      </h4>
+                      <p className="text-emerald-200/90 text-sm mb-5">
+                        Tu depósito en pesos colombianos ha sido verificado y procesado por el sistema.
+                      </p>
+
+                      <div className="bg-black/50 border border-emerald-500/30 rounded-xl p-4 mb-5 text-left space-y-3">
+                        <div className="flex justify-between items-center pb-2.5 border-b border-white/10">
+                          <span className="text-gray-400 text-xs font-medium">Monto Depositado</span>
+                          <span className="text-xl font-bold text-white font-mono">
+                            ${confirmedCopDeposit.amountCop.toLocaleString('de-DE')} COP
+                          </span>
+                        </div>
+
+                        {confirmedCopDeposit.reference && (
+                          <div className="flex justify-between items-center pb-2.5 border-b border-white/10">
+                            <span className="text-gray-400 text-xs font-medium">Referencia</span>
+                            <span className="text-xs font-mono bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/30">
+                              {confirmedCopDeposit.reference}
+                            </span>
+                          </div>
+                        )}
+
+                        {confirmedCopDeposit.senderName && (
+                          <div className="flex justify-between items-center pb-2.5 border-b border-white/10">
+                            <span className="text-gray-400 text-xs font-medium">Titular Remitente</span>
+                            <span className="text-sm font-semibold text-emerald-200 truncate max-w-[200px]">
+                              {confirmedCopDeposit.senderName}
+                            </span>
+                          </div>
+                        )}
+
+                        <div className="flex justify-between items-center pt-1">
+                          <span className="text-gray-400 text-xs font-medium">Acreditación BTC</span>
+                          {confirmedCopDeposit.btcBought ? (
+                            <span className="text-sm font-bold text-amber-400 font-mono flex items-center gap-1 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/30">
+                              <span>⚡</span> +{confirmedCopDeposit.btcBought} BTC
+                            </span>
+                          ) : (
+                            <span className="text-xs text-emerald-400 flex items-center gap-1.5 animate-pulse">
+                              <span className="inline-block animate-spin">⏳</span> Actualizando balance...
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-center gap-2 text-xs text-emerald-300/90 mb-5 bg-emerald-500/10 py-2 px-3 rounded-lg border border-emerald-500/20">
+                        <CheckCircleIcon className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span>Tu saldo en la plataforma ha sido actualizado correctamente.</span>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                        <button
+                          onClick={() => {
+                            if (confirmedCopDeposit.id) {
+                              markConfirmationDismissed(confirmedCopDeposit.id);
+                            }
+                            if (confirmedCopDeposit.depositId) {
+                              markConfirmationDismissed(confirmedCopDeposit.depositId);
+                            }
+                            setConfirmedCopDeposit(null);
+                            setShowCopConfirmedBanner(false);
+                            setCopDepositAmount('');
+                            setIntentError(null);
+                          }}
+                          className="w-full sm:w-auto px-6 py-3 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 text-white font-bold rounded-xl shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 text-sm"
+                        >
+                          <span>Realizar otro depósito</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            if (confirmedCopDeposit.id) {
+                              markConfirmationDismissed(confirmedCopDeposit.id);
+                            }
+                            if (confirmedCopDeposit.depositId) {
+                              markConfirmationDismissed(confirmedCopDeposit.depositId);
+                            }
+                            setConfirmedCopDeposit(null);
+                            setShowCopConfirmedBanner(false);
+                            setShowCopDepositos(false);
+                          }}
+                          className="w-full sm:w-auto px-5 py-3 bg-white/10 hover:bg-white/20 text-gray-300 hover:text-white font-medium rounded-xl transition-all text-sm"
+                        >
+                          Cerrar
+                        </button>
+                      </div>
+                    </div>
+                  ) : activeDepositIntent ? (
                     <div className="bg-emerald-950/40 border border-emerald-500/40 p-5 rounded-2xl animate-fade-in mb-6 text-left">
                       <div className="flex items-center justify-between border-b border-emerald-500/20 pb-3 mb-3">
                         <span className="text-emerald-400 font-bold text-sm flex items-center gap-2">
